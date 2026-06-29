@@ -1,0 +1,27 @@
+{
+  "name": "ai-counseling-extension",
+  "version": "0.1.0",
+  "description": "A minimal Chrome extension foundation built with WXT, React, and TypeScript.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "wxt -b chrome --host 127.0.0.1 --port 3000",
+    "dev:brave": "WXT_CHROMIUM_BINARY=./scripts/brave-flatpak wxt -b chrome --host 127.0.0.1 --port 3000",
+    "dev:chrome-flatpak": "WXT_CHROMIUM_BINARY=./scripts/chrome-flatpak wxt -b chrome --host 127.0.0.1 --port 3000",
+    "dev:manual": "WXT_MANUAL_DEV=true wxt -b chrome --host 127.0.0.1 --port 3001",
+    "build": "wxt build -b chrome",
+    "compile": "wxt prepare && tsc --noEmit",
+    "zip": "wxt zip -b chrome"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@wxt-dev/module-react": "^1.2.2",
+    "typescript": "^6.0.3",
+    "wxt": "^0.20.27"
+  }
+}
