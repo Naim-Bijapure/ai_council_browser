@@ -1,34 +1,42 @@
 ## ADDED Requirements
 
-### Requirement: Mixed Real And Demo Agent Execution
-The background orchestrator SHALL support a mixed execution model where ChatGPT can run through real automation while non-automated apps remain in the configured fallback path.
+### Requirement: Fixed ChatGPT To DeepSeek Workflow
+The background orchestrator SHALL run a fixed automation workflow with ChatGPT as the only agent and DeepSeek as the only judge.
 
-#### Scenario: ChatGPT selected as an agent
-- **WHEN** a valid council run includes ChatGPT as a selected agent
-- **THEN** the orchestrator runs ChatGPT through the real-agent automation path
+#### Scenario: Valid fixed-flow run starts
+- **WHEN** the side panel submits a valid prompt for the fixed-flow run
+- **THEN** the orchestrator starts a session using ChatGPT as the agent and DeepSeek as the judge
 
-#### Scenario: Non-automated app selected as an agent
-- **WHEN** a valid council run includes an app without real automation support
-- **THEN** the orchestrator resolves that app through the configured fallback behavior and does not block the ChatGPT real run
+#### Scenario: App selections are not required
+- **WHEN** the fixed-flow side panel starts a run
+- **THEN** the orchestrator does not require user-selected agent or judge app lists
 
-### Requirement: Real Agent Status Broadcasts
-The background orchestrator SHALL broadcast real-agent status changes through the existing side-panel snapshot model.
+### Requirement: ChatGPT Agent Then DeepSeek Judge Order
+The background orchestrator SHALL complete the ChatGPT agent step before submitting the DeepSeek judge step.
 
-#### Scenario: Real agent progresses
-- **WHEN** a real ChatGPT agent moves through readiness, injection, waiting, and completion
-- **THEN** the side panel receives updated snapshots using the existing agent status fields
+#### Scenario: ChatGPT response succeeds
+- **WHEN** ChatGPT automation returns response text
+- **THEN** the orchestrator builds the judge prompt from the original user prompt and ChatGPT response
 
-#### Scenario: Real agent fails
-- **WHEN** ChatGPT automation fails with a known error reason
-- **THEN** the side panel receives an updated snapshot showing the agent error without crashing the session
-
-### Requirement: Judge Prompt From Real Results
-The background orchestrator SHALL include successful real-agent responses in the existing judge prompt builder.
-
-#### Scenario: Real ChatGPT response succeeds
-- **WHEN** ChatGPT automation returns response text and other selected agents have resolved
-- **THEN** the generated judge prompt includes the real ChatGPT response text
-
-#### Scenario: Real ChatGPT response fails
+#### Scenario: ChatGPT response fails
 - **WHEN** ChatGPT automation resolves as timeout or error
-- **THEN** the generated judge prompt represents ChatGPT as unavailable using the recorded status or error reason
+- **THEN** the orchestrator does not submit a DeepSeek judge prompt and completes the session with the recorded ChatGPT failure
+
+#### Scenario: DeepSeek judge succeeds
+- **WHEN** DeepSeek automation returns judge response text
+- **THEN** the orchestrator completes the session with the final judge response
+
+### Requirement: Fixed Workflow Status Broadcasts
+The background orchestrator SHALL broadcast ChatGPT agent and DeepSeek judge status changes through the side-panel snapshot model.
+
+#### Scenario: ChatGPT progresses
+- **WHEN** ChatGPT moves through readiness, injection, waiting, and completion
+- **THEN** the side panel receives updated snapshots for the agent step
+
+#### Scenario: DeepSeek progresses
+- **WHEN** DeepSeek moves through readiness, injection, waiting, and completion
+- **THEN** the side panel receives updated snapshots for the judge step
+
+#### Scenario: Fixed workflow fails
+- **WHEN** ChatGPT or DeepSeek automation fails with a known error reason
+- **THEN** the side panel receives an updated snapshot showing the failure without crashing the extension
