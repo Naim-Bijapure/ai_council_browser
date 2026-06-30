@@ -447,3 +447,76 @@ progress::-webkit-progress-value {
 .history-row.dimmed {
   opacity: 0.62;
 }
+
+.probe-block {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.probe-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.probe-status {
+  font-size: 13px;
+  color: #5b6478;
+  font-style: italic;
+}
+
+.probe-results {
+  padding: 10px;
+  border: 1px solid #dce2ea;
+  border-radius: 6px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.probe-meta {
+  font-size: 12px;
+  color: #5b6478;
+  margin-bottom: 4px;
+}
+
+.probe-row {
+  display: grid;
+  grid-template-columns: 20px 90px 1fr;
+  align-items: baseline;
+  font-size: 13px;
+  gap: 4px;
+}
+
+.probe-icon {
+  font-weight: 700;
+  text-align: center;
+}
+
+.probe-field {
+  color: #5b6478;
+  font-weight: 600;
+}
+
+.probe-detail {
+  color: #243144;
+  word-break: break-word;
+}
+
+.probe-pass .probe-icon {
+  color: #157f3d;
+}
+
+.probe-fail .probe-icon {
+  color: #b42318;
+}
+
+.probe-warn .probe-icon {
+  color: #b54708;
+}
+
+.probe-skip .probe-icon {
+  color: #5b6478;
+}

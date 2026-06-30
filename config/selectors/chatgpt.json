@@ -1,23 +1,19 @@
 {
   "appKey": "chatgpt",
-  "_comment": "Selectors verified from chatgpt.com DOM inspection 2026-06-29. Native CSS only, ordered priority arrays.",
+  "_comment": "Verified 2026-06-30 from chatgpt.com DOM inspection. Input is ProseMirror div#prompt-textarea (contenteditable). Hidden fallback textarea excluded — would match invisible element. Send button has data-testid='send-button' when text is typed (aria-label='Start Voice' when empty). Response bubble is div.markdown.prose. Stop button only appears during generation.",
   "selectors": {
     "input": [
       "div#prompt-textarea",
       "div[contenteditable='true'][role='textbox']",
-      "div[contenteditable='true'][aria-label='Chat with ChatGPT']",
-      "textarea[aria-label='Chat with ChatGPT']",
-      "textarea[placeholder*='Ask anything']"
+      "div[contenteditable='true'][aria-label='Chat with ChatGPT']"
     ],
     "send": [
       "button[data-testid='send-button']",
-      "button#composer-submit-button",
       "button[aria-label='Send prompt']"
     ],
     "response": [
       "div[data-message-author-role='assistant']",
-      "div.markdown.prose",
-      "article div[data-message-author-role='assistant']"
+      "div.markdown.prose"
     ],
     "completion": [
       "button[data-testid='stop-button']",

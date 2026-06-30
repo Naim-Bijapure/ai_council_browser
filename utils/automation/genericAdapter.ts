@@ -22,6 +22,30 @@ const MIN_RESPONSE_LENGTH = 10;
 const SEND_CONFIRMATION_TIMEOUT_MS = 15_000;
 const SEND_CONFIRMATION_POLL_MS = 300;
 
+function submitViaEnterKey(inputElement: HTMLElement): void {
+  // Focus the element to ensure key events are received
+  try {
+    inputElement.focus();
+  } catch {
+    // ignore
+  }
+
+  // Dispatch keydown → keypress → keyup sequence for Enter
+  // Many frameworks (Antd onPressEnter, React onKeyDown) listen on keydown
+  const enterInit = {
+    bubbles: true,
+    cancelable: true,
+    key: "Enter",
+    code: "Enter",
+    keyCode: 13,
+    which: 13
+  };
+
+  inputElement.dispatchEvent(new KeyboardEvent("keydown", enterInit));
+  inputElement.dispatchEvent(new KeyboardEvent("keypress", enterInit));
+  inputElement.dispatchEvent(new KeyboardEvent("keyup", enterInit));
+}
+
 function log(appKey: AppKey, stage: string, detail?: unknown): void {
   console.log(`[${appKey} Adapter] ${stage}`, detail ?? "");
 }
@@ -74,20 +98,31 @@ export async function runAgent(
     selectors.send,
     DEFAULT_AUTOMATION_TIMEOUTS.sendButtonEnableMs
   );
-  if (!sendButton) {
-    log(appKey, "FAILED: send button did not appear or enable");
-    return { success: false, errorReason: "send_button_disabled", completedAt: Date.now() };
-  }
 
-  // Step 5: Click send
-  if (isDisabled(sendButton)) {
-    log(appKey, "FAILED: send button disabled on click attempt");
-    return { success: false, errorReason: "send_button_disabled", completedAt: Date.now() };
-  }
+  if (sendButton && !isDisabled(sendButton)) {
+    // Step 5: Click send
+    log(appKey, "Clicking send button...");
+    clickElement(sendButton);
+    log(appKey, "Send button clicked");
+    await sleep(500);
 
-  log(appKey, "Clicking send button...");
-  clickElement(sendButton);
-  log(appKey, "Send button clicked");
+    // Check if the click actually submitted — if the input still has text,
+    // the framework ignored the synthetic click. Try Enter key as a backup.
+    const remainingText =
+      inputElement instanceof HTMLTextAreaElement || inputElement instanceof HTMLInputElement
+        ? inputElement.value
+        : (inputElement.innerText ?? inputElement.textContent ?? "");
+    if (remainingText.trim()) {
+      log(appKey, "Send button click didn't submit — trying Enter-key backup...");
+      submitViaEnterKey(inputElement);
+    }
+  } else {
+    // Fallback: submit via Enter key (works for Antd onPressEnter, React onKeyDown, etc.)
+    log(appKey, "Send button not found or disabled — trying Enter-key fallback...");
+    submitViaEnterKey(inputElement);
+    log(appKey, "Enter key dispatched");
+    await sleep(500);
+  }
 
   // Step 6: Wait for response
   log(appKey, "Waiting for response completion...");
@@ -156,22 +191,31 @@ export async function runJudge(
     selectors.send,
     DEFAULT_AUTOMATION_TIMEOUTS.sendButtonEnableMs
   );
-  if (!sendButton) {
-    log(appKey, "FAILED: send button did not appear or enable");
-    return { sent: false, errorReason: "send_button_disabled" };
-  }
-
-  // Step 5: Click send
-  if (isDisabled(sendButton)) {
-    log(appKey, "FAILED: send button disabled on click attempt");
-    return { sent: false, errorReason: "send_button_disabled" };
-  }
 
   const urlBeforeSend = window.location.href;
   const hadResponseContainer = getResponseContainer(selectors.response) !== null;
 
-  log(appKey, "Clicking send button...");
-  clickElement(sendButton);
+  if (sendButton && !isDisabled(sendButton)) {
+    log(appKey, "Clicking send button...");
+    clickElement(sendButton);
+    await sleep(500);
+
+    // Check if the click actually submitted — if the input still has text,
+    // the framework ignored the synthetic click. Try Enter key as a backup.
+    const remainingText =
+      inputElement instanceof HTMLTextAreaElement || inputElement instanceof HTMLInputElement
+        ? inputElement.value
+        : (inputElement.innerText ?? inputElement.textContent ?? "");
+    if (remainingText.trim()) {
+      log(appKey, "Send button click didn't submit — trying Enter-key backup...");
+      submitViaEnterKey(inputElement);
+    }
+  } else {
+    log(appKey, "Send button not found or disabled — trying Enter-key fallback...");
+    submitViaEnterKey(inputElement);
+    log(appKey, "Enter key dispatched");
+    await sleep(500);
+  }
 
   // Step 6: Confirm message sent
   log(appKey, "Confirming message sent...");
@@ -194,19 +238,12 @@ async function waitForResponseCompletion(
   let mutationObserved = false;
   let lastMutationTime = Date.now();
 
-  const responseContainer = getResponseContainer(selectors.response);
-  log(appKey, "  Response container at start", responseContainer ? "found" : "not found");
-
   const observer = new MutationObserver(() => {
     mutationObserved = true;
     lastMutationTime = Date.now();
   });
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: true
-  });
+  let observedTarget: Element | null = null;
 
   try {
     while (Date.now() < deadline) {
@@ -223,15 +260,27 @@ async function waitForResponseCompletion(
         }
       }
 
-      // Signal 3: DOM stabilization
+      // Signal 3: DOM stabilization (scoped to response container)
       const currentContainer = getResponseContainer(selectors.response);
-      if (currentContainer && hasResponseStarted(currentContainer)) {
-        const text = (currentContainer.textContent ?? "").trim();
-        if (text.length >= MIN_RESPONSE_LENGTH && mutationObserved) {
-          const quietTime = Date.now() - lastMutationTime;
-          if (quietTime >= DOM_STABILIZATION_QUIET_MS) {
-            log(appKey, "  Completion detected: DOM stabilized", { textLength: text.length });
-            return { timedOut: false };
+      if (currentContainer) {
+        if (observedTarget !== currentContainer) {
+          observer.disconnect();
+          observedTarget = currentContainer;
+          observer.observe(currentContainer, {
+            childList: true,
+            subtree: true,
+            characterData: true
+          });
+        }
+
+        if (hasResponseStarted(currentContainer)) {
+          const text = (currentContainer.textContent ?? "").trim();
+          if (text.length >= MIN_RESPONSE_LENGTH && mutationObserved) {
+            const quietTime = Date.now() - lastMutationTime;
+            if (quietTime >= DOM_STABILIZATION_QUIET_MS) {
+              log(appKey, "  Completion detected: DOM stabilized", { textLength: text.length });
+              return { timedOut: false };
+            }
           }
         }
       }

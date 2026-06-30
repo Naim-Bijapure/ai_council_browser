@@ -1,7 +1,11 @@
 import { browser } from "wxt/browser";
 import { getSupportedApp } from "../utils/appRegistry";
-import { runDiagnostic } from "../utils/automation/diagnostics";
+import { openTabAndListenForReady, runDiagnostic } from "../utils/automation/diagnostics";
+import { loadSelectorConfig } from "../utils/automation/selectorConfig";
 import { runCouncil } from "../utils/automation/councilRunner";
+import type { ContentToBgMessage } from "../utils/automation/messages";
+import type { ProbeMode, ProbeResult as AutomationProbeResult } from "../utils/automation/types";
+import { DEFAULT_AUTOMATION_TIMEOUTS } from "../utils/automation/types";
 import { getPreferences, savePreferences } from "../utils/preferences";
 import { clearSessions, listSessions } from "../utils/history";
 import {
@@ -109,6 +113,9 @@ async function handlePanelMessage(message: PanelRequest): Promise<PanelResponse>
 
     case "RUN_DIAGNOSTIC":
       return runDiagnostics(message.agentKeys);
+
+    case "RUN_PROBE":
+      return runProbe(message.appKey, message.mode);
 
     default:
       return { ok: false, error: "Unknown request" };
@@ -303,4 +310,95 @@ async function runDiagnostics(agentKeys: AppKey[]): Promise<PanelResponse> {
   }
 
   return { ok: true, diagnostic: report, snapshot: getSnapshot() };
+}
+
+async function runProbe(appKey: AppKey, mode: ProbeMode): Promise<PanelResponse> {
+  const app = getSupportedApp(appKey);
+
+  const tabResult = await openTabAndListenForReady(
+    app.newChatUrl,
+    DEFAULT_AUTOMATION_TIMEOUTS.tabLoadMs,
+    DEFAULT_AUTOMATION_TIMEOUTS.contentReadyMs,
+    appKey,
+    true
+  );
+
+  if (!tabResult.loaded || !tabResult.contentReady) {
+    return {
+      ok: false,
+      error: tabResult.loaded ? "content_script_timeout" : "tab_load_timeout",
+      snapshot: getSnapshot()
+    };
+  }
+
+  const tabId = tabResult.tabId;
+  if (tabId == null) {
+    return { ok: false, error: "tab_load_timeout", snapshot: getSnapshot() };
+  }
+
+  const config = await loadSelectorConfig(appKey);
+
+  const probeResult = await sendProbeRun(appKey, tabId, config.selectors, mode);
+
+  return { ok: true, probe: probeResult, snapshot: getSnapshot() };
+}
+
+async function sendProbeRun(
+  appKey: AppKey,
+  tabId: number,
+  selectors: Awaited<ReturnType<typeof loadSelectorConfig>>["selectors"],
+  mode: ProbeMode
+): Promise<AutomationProbeResult> {
+  return new Promise<AutomationProbeResult>((resolve) => {
+    const timeoutMs = mode === "live" ? 60_000 : 15_000;
+    const timer = setTimeout(() => {
+      browser.runtime.onMessage.removeListener(listener);
+      resolve({
+        appKey,
+        mode,
+        steps: [{
+          field: "input",
+          status: "fail",
+          detail: "probe timed out"
+        }],
+        durationMs: 0
+      });
+    }, timeoutMs);
+
+    const listener = (message: ContentToBgMessage, sender: Browser.runtime.MessageSender) => {
+      if (
+        message.type === "PROBE_RESULT" &&
+        message.appKey === appKey &&
+        sender.tab?.id === tabId
+      ) {
+        clearTimeout(timer);
+        browser.runtime.onMessage.removeListener(listener);
+        resolve(message.result);
+      }
+    };
+
+    browser.runtime.onMessage.addListener(listener);
+
+    void browser.tabs
+      .sendMessage(tabId, {
+        type: "PROBE_RUN",
+        appKey,
+        selectors,
+        mode
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        browser.runtime.onMessage.removeListener(listener);
+        resolve({
+          appKey,
+          mode,
+          steps: [{
+            field: "input",
+            status: "fail",
+            detail: "failed to send PROBE_RUN message"
+          }],
+          durationMs: 0
+        });
+      });
+  });
 }

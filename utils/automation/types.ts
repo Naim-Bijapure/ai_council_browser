@@ -76,3 +76,33 @@ export const LOGIN_URL_PATTERNS: Record<AppKey, string[]> = {
   qwen: ["/login"],
   kimi: ["/login"]
 };
+
+export type ProbeMode = "static" | "live";
+
+export type ProbeStepStatus = "pass" | "fail" | "warn" | "skip";
+
+export type ProbeField =
+  | "input"
+  | "send"
+  | "response"
+  | "completion"
+  | "blocked"
+  | "loginError"
+  | "injection"
+  | "send_click"
+  | "response_wait"
+  | "response_preview";
+
+export interface ProbeStep {
+  field: ProbeField;
+  status: ProbeStepStatus;
+  detail: string;
+  matchedSelector?: string;
+}
+
+export interface ProbeResult {
+  appKey: AppKey;
+  mode: ProbeMode;
+  steps: ProbeStep[];
+  durationMs: number;
+}

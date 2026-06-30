@@ -1,3 +1,5 @@
+import type { ProbeResult as AutomationProbeResult } from "./automation/types";
+
 export const MAX_USER_PROMPT_LENGTH = 10_000;
 
 export type AppKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "qwen" | "kimi";
@@ -110,7 +112,8 @@ export type PanelRequest =
   | { type: "SWITCH_TO_JUDGE" }
   | { type: "GET_HISTORY" }
   | { type: "CLEAR_HISTORY" }
-  | { type: "RUN_DIAGNOSTIC"; agentKeys: AppKey[] };
+  | { type: "RUN_DIAGNOSTIC"; agentKeys: AppKey[] }
+  | { type: "RUN_PROBE"; appKey: AppKey; mode: "static" | "live" };
 
 export type BackgroundEvent = {
   type: "SESSION_UPDATED";
@@ -130,6 +133,7 @@ export type PanelResponse =
       snapshot?: CouncilSnapshot;
       history?: StoredCouncilSession[];
       diagnostic?: DiagnosticReport;
+      probe?: AutomationProbeResult;
     }
   | {
       ok: false;

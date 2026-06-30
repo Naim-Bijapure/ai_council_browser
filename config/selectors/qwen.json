@@ -1,24 +1,26 @@
 {
     "appKey": "qwen",
-    "_comment": "Qwen.ai selector config. Input is a textarea. Send button is a div. Response and completion selectors are best guesses—please inspect the live DOM during an active chat to refine them. The stop button may appear as the send button with a different icon/class, but we provide a generic fallback.",
+    "_comment": "Verified 2026-06-30. Uses Ant Design (antd). Input is textarea.message-input-textarea. Send button is button.send-button (renders only after text is typed). During streaming, the send button gets disabled (HTML disabled attr + class) — used as completion indicator. Response bubble is div.chat-response-message.",
     "selectors": {
         "input": [
             "textarea.message-input-textarea",
-            "textarea[placeholder*='How can I help you t']",
-            "div.message-input"
+            "textarea[placeholder=\"How can I help you today?\"]"
         ],
         "send": [
-            "div.message-input-right-button-send",
-            "div.message-input-right-button",
-            "button#show-shortcuts-button"
+            "button.send-button",
+            ".chat-prompt-send-button button",
+            "div.message-input-right-button-send button"
         ],
         "response": [
-            "div.desktop-layout-content",
-            "div.chat-message-input-fixed-container",
-            "div.message-input-container"
+            "div.chat-response-message",
+            "div[id^=\"chat-response-message-\"]",
+            "div.response-message-content"
         ],
-        "completion": ["button[aria-label='Stop']", "div.message-input-right-button-send.stop", "div[class*='stop']"],
-        "blocked": ["div[class*='rate-limit']", "div[class*='captcha']", "div[class*='error']"],
-        "loginError": ["a[href*='login']", "a[href*='signin']", "button[class*='login']"]
+        "completion": [],
+        "blocked": [],
+        "loginError": [
+            "a[href*='login']",
+            "a[href*='signin']"
+        ]
     }
 }

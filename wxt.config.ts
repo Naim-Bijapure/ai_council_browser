@@ -21,7 +21,9 @@ export default defineConfig({
       "https://claude.ai/*",
       "https://gemini.google.com/*",
       "https://chat.qwen.ai/*",
-      "https://kimi.moonshot.cn/*"
+      "https://kimi.moonshot.cn/*",
+      "https://www.kimi.com/*",
+      "https://kimi.com/*"
     ],
     action: {
       default_title: "Open AI Council"

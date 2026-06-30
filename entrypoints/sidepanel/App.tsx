@@ -10,6 +10,7 @@ import {
 } from "../../utils/format";
 import {
   getAppsForRole,
+  SUPPORTED_APPS,
   type SupportedAppWithRoles
 } from "../../utils/appRegistry";
 import {
@@ -24,6 +25,7 @@ import {
   type PanelResponse,
   type StoredCouncilSession
 } from "../../utils/types";
+import type { ProbeResult, ProbeStep } from "../../utils/automation/types";
 
 type ActiveTab = "council" | "history";
 
@@ -63,6 +65,10 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [diagnostic, setDiagnostic] = useState<DiagnosticReport | null>(null);
   const [diagnosticRunning, setDiagnosticRunning] = useState(false);
+  const [probeApp, setProbeApp] = useState<AppKey>("qwen");
+  const [probeRunning, setProbeRunning] = useState(false);
+  const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
+  const [probeError, setProbeError] = useState("");
 
   const activeSession = snapshot.state === "active" ? snapshot.session : null;
   const isRunning = activeSession?.status === "running";
@@ -227,6 +233,27 @@ export default function App() {
     }
   }
 
+  async function runProbe(mode: "static" | "live"): Promise<void> {
+    setProbeRunning(true);
+    setError("");
+    setProbeError("");
+    setProbeResult(null);
+    try {
+      const response = await sendMessage({ type: "RUN_PROBE", appKey: probeApp, mode });
+      if (response.ok && response.probe) {
+        setProbeResult(response.probe);
+      } else if (!response.ok) {
+        setProbeError(response.error);
+      } else {
+        setProbeError("probe result missing from response");
+      }
+    } catch (err) {
+      setProbeError(err instanceof Error ? err.message : "probe request failed");
+    } finally {
+      setProbeRunning(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -341,6 +368,52 @@ export default function App() {
                         </div>
                       );
                     })}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="probe-block">
+                <label className="field-label" htmlFor="probe-app">Selector Probe</label>
+                <select
+                  id="probe-app"
+                  value={probeApp}
+                  onChange={(event) => setProbeApp(event.target.value as AppKey)}
+                  disabled={probeRunning}
+                >
+                  {SUPPORTED_APPS.map((app) => (
+                    <option key={app.key} value={app.key}>
+                      {app.displayName}
+                    </option>
+                  ))}
+                </select>
+                <div className="probe-buttons">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    disabled={probeRunning}
+                    onClick={() => void runProbe("static")}
+                  >
+                    Static Probe
+                  </button>
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    disabled={probeRunning}
+                    onClick={() => void runProbe("live")}
+                  >
+                    Live Probe
+                  </button>
+                </div>
+                {probeRunning ? <div className="probe-status">Probing…</div> : null}
+                {probeError ? <div className="inline-error">{probeError}</div> : null}
+                {probeResult ? (
+                  <div className="probe-results">
+                    <div className="probe-meta">
+                      {APP_LABELS[probeResult.appKey] ?? probeResult.appKey} · {probeResult.mode} · {probeResult.durationMs}ms
+                    </div>
+                    {probeResult.steps.map((s, i) => (
+                      <ProbeStepRow key={i} step={s} />
+                    ))}
                   </div>
                 ) : null}
               </div>
@@ -497,5 +570,22 @@ function HistoryView({ history, onClearHistory }: HistoryViewProps) {
         </div>
       )}
     </section>
+  );
+}
+
+const PROBE_ICONS: Record<ProbeStep["status"], string> = {
+  pass: "✓",
+  fail: "✗",
+  warn: "⚠",
+  skip: "→"
+};
+
+function ProbeStepRow({ step }: { step: ProbeStep }) {
+  return (
+    <div className={`probe-row probe-${step.status}`}>
+      <span className="probe-icon">{PROBE_ICONS[step.status]}</span>
+      <span className="probe-field">{step.field}</span>
+      <span className="probe-detail">{step.detail}</span>
+    </div>
   );
 }

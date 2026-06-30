@@ -1,12 +1,13 @@
 import { browser } from "wxt/browser";
 import type { BgToContentMessage, ContentToBgMessage } from "./messages";
-import type { AdapterResult, ReadinessResult, SelectorGroup, SendConfirmationResult } from "./types";
+import type { AdapterResult, ProbeMode, ProbeResult, ReadinessResult, SelectorGroup, SendConfirmationResult } from "./types";
 import type { AppKey } from "../types";
 
 export interface ContentScriptHandlers {
   onAgentRun: (prompt: string, selectors: SelectorGroup) => Promise<AdapterResult>;
   onJudgeRun: (prompt: string, selectors: SelectorGroup) => Promise<SendConfirmationResult>;
   onDiagnosticCheck: (selectors: SelectorGroup) => Promise<ReadinessResult>;
+  onProbeRun: (mode: ProbeMode, selectors: SelectorGroup) => Promise<ProbeResult>;
   onCancel: () => void;
 }
 
@@ -74,6 +75,30 @@ export function createContentScriptBridge(appKey: AppKey, handlers: ContentScrip
               appKey,
               ready: false,
               errorReason: error instanceof Error ? error.message : "dom_error"
+            });
+          });
+
+      case "PROBE_RUN":
+        if (message.appKey !== appKey) return Promise.resolve();
+        return handlers
+          .onProbeRun(message.mode, message.selectors)
+          .then((result) => {
+            void sendToBg({ type: "PROBE_RESULT", appKey, result });
+          })
+          .catch((error: unknown) => {
+            void sendToBg({
+              type: "PROBE_RESULT",
+              appKey,
+              result: {
+                appKey,
+                mode: message.mode,
+                steps: [{
+                  field: "input" as const,
+                  status: "fail" as const,
+                  detail: `probe error: ${error instanceof Error ? error.message : "unknown"}`
+                }],
+                durationMs: 0
+              }
             });
           });
 

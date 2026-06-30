@@ -1,5 +1,5 @@
 import type { AppKey } from "../types";
-import type { AdapterResult, ReadinessResult, SelectorGroup, SendConfirmationResult } from "./types";
+import type { AdapterResult, ProbeMode, ProbeResult, ReadinessResult, SelectorGroup, SendConfirmationResult } from "./types";
 
 export type BgToContentMessage =
   | {
@@ -18,6 +18,12 @@ export type BgToContentMessage =
       type: "DIAGNOSTIC_CHECK";
       appKey: AppKey;
       selectors: SelectorGroup;
+    }
+  | {
+      type: "PROBE_RUN";
+      appKey: AppKey;
+      selectors: SelectorGroup;
+      mode: ProbeMode;
     }
   | { type: "CANCEL" };
 
@@ -47,6 +53,11 @@ export type ContentToBgMessage =
       appKey: AppKey;
       ready: boolean;
       errorReason?: string;
+    }
+  | {
+      type: "PROBE_RESULT";
+      appKey: AppKey;
+      result: ProbeResult;
     };
 
 export type ReadinessPayload = ReadinessResult;

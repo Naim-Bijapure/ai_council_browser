@@ -1,24 +1,24 @@
 {
   "appKey": "claude",
-  "_comment": "Placeholder selectors. Native CSS only. Replace after inspecting claude.ai DOM.",
+  "_comment": "Verified 2026-06-30 from claude.ai DOM inspection. Input is ProseMirror (tiptap) with data-testid='chat-input'. Send button is button[aria-label='Send message'] (only visible while text is typed). Response bubble is div.font-claude-response. Stop button selector pending — only visible during generation.",
   "selectors": {
     "input": [
-      "div[contenteditable='true'][role='textbox']",
-      "div.ProseMirror[contenteditable='true']",
-      "textarea[placeholder*='message']"
+      "div[data-testid='chat-input']",
+      "div[aria-label='Write your prompt to Claude']",
+      "div.tiptap.ProseMirror[contenteditable='true']"
     ],
     "send": [
-      "button[aria-label='Send Message']",
+      "button[aria-label='Send message']",
+      "button[aria-label='Send']",
       "button[type='submit']"
     ],
     "response": [
-      "div[data-testid='message']",
-      "div.font-claude-message",
-      "div.prose"
+      "div.font-claude-response",
+      "div.standard-markdown"
     ],
     "completion": [
       "button[aria-label='Stop']",
-      "div[role='button'][aria-label*='stop']"
+      "button[aria-label='Stop generating']"
     ],
     "blocked": [],
     "loginError": [

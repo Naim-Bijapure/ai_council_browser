@@ -1,29 +1,27 @@
 {
   "appKey": "kimi",
-  "_comment": "Placeholder selectors. Native CSS only. Replace after inspecting kimi.moonshot.cn DOM.",
+  "_comment": "Verified 2026-06-30 from www.kimi.com DOM inspection. Input is contenteditable div.chat-input-editor[role='textbox']. No send button visible in DOM (no aria-label, no class) — relies on Enter-key submission. Response container div.chat-content-item.chat-content-item-assistant appears after message sent. Clean answer text in div.markdown-container. No stop button found — rely on DOM stabilization.",
   "selectors": {
     "input": [
-      "textarea[placeholder*='message']",
-      "div[contenteditable='true'][role='textbox']",
-      "textarea.editor"
+      "div.chat-input-editor[role='textbox'][contenteditable='true']",
+      "div.chat-input-editor[contenteditable='true']",
+      "div[role='textbox'][contenteditable='true']"
     ],
     "send": [
+      "div[role='button'][aria-label='Send']",
       "button[aria-label='Send']",
-      "div[role='button'][aria-label*='send']",
-      "button[type='submit']"
+      "div.send-button"
     ],
     "response": [
-      "div.markdown",
-      "div[class*='message-content']",
-      "div[class*='answer']"
+      "div.chat-content-item.chat-content-item-assistant",
+      "div.segment.segment-assistant",
+      "div.markdown-container"
     ],
-    "completion": [
-      "button[aria-label='Stop']",
-      "div[role='button'][aria-label*='stop']"
-    ],
+    "completion": [],
     "blocked": [],
     "loginError": [
-      "a[href*='/login']"
+      "a[href*='login']",
+      "a[href*='signin']"
     ]
   }
 }

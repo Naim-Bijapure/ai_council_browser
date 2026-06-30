@@ -1,29 +1,26 @@
 {
   "appKey": "gemini",
-  "_comment": "Placeholder selectors. Native CSS only. Replace after inspecting gemini.google.com DOM.",
+  "_comment": "Verified 2026-06-30 from gemini.google.com DOM inspection. Input is Quill editor (ql-editor) with aria-label='Enter a prompt for Gemini'. Send button is button[aria-label='Send message'] — only visible while text is typed. Response container div.response-container only appears after a message is sent (not in zero-state). Clean answer text is in div.markdown.markdown-main-panel. No stop button found in DOM — rely on DOM stabilization.",
   "selectors": {
     "input": [
-      "rich-textarea[contenteditable='true']",
-      "div[contenteditable='true'][role='textbox']",
-      "textarea[placeholder*='Enter']"
+      "div[aria-label='Enter a prompt for Gemini']",
+      "div.ql-editor[role='textbox'][contenteditable='true']",
+      "div.ql-editor.textarea[contenteditable='true']"
     ],
     "send": [
-      "button[aria-label='Send message']",
-      "mat-icon[aria-label='Send message']",
-      "button.send-button"
+      "button[aria-label='Send message']"
     ],
     "response": [
-      "message-content",
       "div.response-container",
-      "div.markdown-main-panel"
+      "div.markdown.markdown-main-panel",
+      "div.presented-response-container"
     ],
-    "completion": [
-      "button[aria-label='Stop']",
-      "mat-icon[aria-label='Stop generating']"
-    ],
+    "completion": [],
     "blocked": [],
     "loginError": [
-      "a[href*='accounts.google.com']"
+      "form[action*='ServiceLogin']",
+      "input[type='password']",
+      "div[aria-label='Sign in']"
     ]
   }
 }

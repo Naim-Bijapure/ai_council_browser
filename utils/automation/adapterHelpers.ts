@@ -71,12 +71,25 @@ export function setInputText(element: HTMLElement, text: string): void {
       element.dispatchEvent(new Event("change", { bubbles: true }));
     }
   } else if (element instanceof HTMLTextAreaElement) {
+    // Focus first — React/Antd may ignore input events on unfocused elements
+    try {
+      element.focus();
+    } catch {
+      // ignore
+    }
+
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     if (setter) {
       setter.call(element, text);
     } else {
       element.value = text;
     }
+
+    // Reset React's value tracker so onChange fires (React suppresses input
+    // events when the tracked value matches the DOM value after a programmatic
+    // set). This is the same technique used by Cypress and Playwright.
+    delete (element as any)._valueTracker;
+
     // Use InputEvent (not generic Event) so React/framework onChange handlers fire
     element.dispatchEvent(
       new InputEvent("input", {
@@ -87,12 +100,21 @@ export function setInputText(element: HTMLElement, text: string): void {
     );
     element.dispatchEvent(new Event("change", { bubbles: true }));
   } else if (element instanceof HTMLInputElement) {
+    try {
+      element.focus();
+    } catch {
+      // ignore
+    }
+
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     if (setter) {
       setter.call(element, text);
     } else {
       element.value = text;
     }
+
+    delete (element as any)._valueTracker;
+
     element.dispatchEvent(
       new InputEvent("input", {
         bubbles: true,
@@ -161,17 +183,46 @@ export function isDisabled(element: HTMLElement): boolean {
 }
 
 export function clickElement(element: HTMLElement): void {
-  // Try native click first
-  element.click();
+  const rect = element.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
 
-  // Also dispatch a proper MouseEvent for frameworks that need it
-  element.dispatchEvent(
-    new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      view: window
-    })
-  );
+  const pointerOpts = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    pointerId: 1,
+    pointerType: "mouse"
+  };
+
+  const mouseOpts = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    button: 0
+  };
+
+  try {
+    element.dispatchEvent(new PointerEvent("pointerdown", pointerOpts));
+  } catch {
+    // PointerEvent may not be available in all contexts
+  }
+  element.dispatchEvent(new MouseEvent("mousedown", mouseOpts));
+
+  try {
+    element.dispatchEvent(new PointerEvent("pointerup", pointerOpts));
+  } catch {
+    // ignore
+  }
+  element.dispatchEvent(new MouseEvent("mouseup", mouseOpts));
+
+  // Native click + synthetic MouseEvent
+  element.click();
+  element.dispatchEvent(new MouseEvent("click", mouseOpts));
 }
 
 export async function waitForElement(

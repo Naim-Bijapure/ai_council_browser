@@ -53,9 +53,9 @@
     {
       "key": "kimi",
       "displayName": "Kimi",
-      "domain": "kimi.moonshot.cn",
-      "matchPatterns": ["https://kimi.moonshot.cn/*"],
-      "newChatUrl": "https://kimi.moonshot.cn/",
+      "domain": "www.kimi.com",
+      "matchPatterns": ["https://www.kimi.com/*", "https://kimi.com/*", "https://kimi.moonshot.cn/*"],
+      "newChatUrl": "https://www.kimi.com/",
       "automationRoles": ["agent", "judge"],
       "loginUrlPatterns": ["/login"],
       "enabled": true
