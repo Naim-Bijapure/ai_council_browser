@@ -1,20 +1,20 @@
 {
   "appKey": "perplexity",
-  "_comment": "Placeholders pending DOM inspection. Run scripts/dom-inspector.js in the Perplexity console to extract structure, then update selectors. App uses contenteditable input similar to Kimi.",
+  "_comment": "Verified 2026-06-30 from www.perplexity.ai DOM inspection. Input is unique-id contenteditable div#ask-input[role='textbox']. Send button is button[aria-label='Submit'] (only enabled when text typed — same pattern as Claude). Response container is div#markdown-content-0 (unique id for latest answer — ID rotates per query, always 0 for active answer). Fallback to div.prose.dark:prose-invert which is the markdown prose class. No stop button — rely on DOM stabilization. Login detection uses a[href*='login'] / a[href*='signin'].",
   "selectors": {
     "input": [
+      "div#ask-input[contenteditable='true']",
+      "div#ask-input",
       "div[contenteditable='true'][role='textbox']",
-      "div[contenteditable='true']",
-      "textarea[placeholder*='Ask']"
+      "div[contenteditable='true']"
     ],
     "send": [
       "button[aria-label='Submit']",
-      "button[aria-label='Send']",
-      "button[type='submit']"
+      "button[type='button'][aria-label='Submit']"
     ],
     "response": [
-      "div[data-testid='answer']",
-      "div.answer-container",
+      "div#markdown-content-0",
+      "div.prose.dark:prose-invert",
       "div.prose"
     ],
     "completion": [],
