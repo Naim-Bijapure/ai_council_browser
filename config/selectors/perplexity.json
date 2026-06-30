@@ -14,7 +14,7 @@
     ],
     "response": [
       "div#markdown-content-0",
-      "div.prose.dark:prose-invert",
+      "div.prose.dark\\:prose-invert",
       "div.prose"
     ],
     "completion": [],

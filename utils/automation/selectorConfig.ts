@@ -79,6 +79,8 @@ function validateSelectorArray(
       );
     }
 
+    validateSelectorSyntax(selector, appKey, group, index);
+
     const pseudoMatch = PSEUDO_SELECTOR_PATTERNS.find((pattern) => selector.includes(pattern));
     if (pseudoMatch) {
       throw new Error(
@@ -86,6 +88,22 @@ function validateSelectorArray(
       );
     }
   });
+}
+
+function validateSelectorSyntax(
+  selector: string,
+  appKey: AppKey,
+  group: keyof SelectorGroup,
+  index: number
+): void {
+  if (typeof document === "undefined") return;
+  try {
+    document.querySelector(selector);
+  } catch (error) {
+    throw new Error(
+      `Selector config for ${appKey} group '${group}' entry at index ${index} is not a valid CSS selector: ${selector} (${error instanceof Error ? error.message : "unknown error"}). Escape special characters in class names (e.g. colons with a backslash: "dark\\:prose-invert").`
+    );
+  }
 }
 
 export function getEmptySelectorGroup(): SelectorGroup {
