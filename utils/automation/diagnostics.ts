@@ -214,8 +214,13 @@ export async function openTabAndListenForReady(
 }
 
 /**
- * Opens an agent tab in the same browser window with `active: false` so it
- * is visible in the tab bar but does not steal focus from the user's tab.
+ * Opens an agent tab in the same browser window with `active: true` so Chrome
+ * gives the page full loading priority. The council runner switches back to
+ * the user's tab after all agent tabs are created, so focus is only briefly
+ * stolen during the setup phase. Background tabs (`active: false`) are
+ * throttled by Chrome — heavy SPAs like Perplexity and Gemini do not finish
+ * loading or render their input elements, causing content_script_timeout
+ * or "input not found" errors.
  */
 export async function openAgentTabInUnfocusedWindow(
   url: string,
@@ -223,7 +228,7 @@ export async function openAgentTabInUnfocusedWindow(
   contentReadyTimeoutMs: number,
   appKey: AppKey
 ): Promise<TabLoadResult> {
-  return openTabAndListenForReady(url, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, false);
+  return openTabAndListenForReady(url, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, true);
 }
 
 export async function openTabAndWaitForLoad(url: string, timeoutMs: number): Promise<Browser.tabs.Tab> {

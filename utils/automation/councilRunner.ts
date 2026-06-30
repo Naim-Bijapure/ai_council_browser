@@ -121,6 +121,18 @@ export async function runCouncil(
       }
     });
 
+    // Switch back to the user's tab after all agent tabs are created.
+    // Agent tabs were opened with active:true so Chrome prioritizes their
+    // page loading; focus returns to the user now while we wait for
+    // content scripts to report ready.
+    if (userTabId != null) {
+      try {
+        await browser.tabs.update(userTabId, { active: true });
+      } catch {
+        // ignore — tab may be closed
+      }
+    }
+
     // Track first agent URL for agentTabUrl
     const firstLoaded = agentTabResults.find((r) => r?.tabUrl);
     if (firstLoaded) {
