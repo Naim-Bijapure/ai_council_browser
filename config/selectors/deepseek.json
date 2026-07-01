@@ -1,6 +1,6 @@
 {
   "appKey": "deepseek",
-  "_comment": "Selectors verified from chat.deepseek.com DOM inspection 2026-06-29. Native CSS only, ordered priority arrays. Note: DeepSeek uses div[role='button'] with class-based disabled state (ds-button--disabled), not HTML disabled attribute.",
+  "_comment": "Selectors verified from chat.deepseek.com DOM 2026-07-01. Native CSS only, ordered priority arrays. DeepSeek uses div[role='button'] with class-based disabled state (ds-button--disabled), not the HTML disabled attribute. Send/stop is a single primary circle button (div.ds-button--primary.ds-button--circle): during generation it is the enabled STOP action; when generation finishes it reverts to SEND and, with the input now empty, gains ds-button--disabled. So the completion signal 'div.ds-button--primary.ds-button--circle:not(.ds-button--disabled)' is present while generating and disappears when done — this lets waitForResponseCompletion wait through DeepSeek's reasoning-phase pauses instead of prematurely completing via text stabilization (which produced half messages). The stop button has no aria-label; icons differ only by inner SVG. A copy/regenerate toolbar appears under the finished answer as a secondary 'done' cue.",
   "selectors": {
     "input": [
       "textarea[placeholder*='Message DeepSeek']",
@@ -20,9 +20,7 @@
       "div[class*='message-content']"
     ],
     "completion": [
-      "div[role='button'][aria-label*='stop']",
-      "div[role='button'][aria-label*='Stop']",
-      "div.ds-button--primary.ds-button--circle[class*='stop']"
+      "div.ds-button--primary.ds-button--circle:not(.ds-button--disabled)"
     ],
     "blocked": [],
     "loginError": [
