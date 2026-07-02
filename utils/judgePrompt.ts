@@ -41,9 +41,10 @@ export function buildJudgePrompt(input: BuildJudgePromptInput): JudgePromptResul
 }
 
 function composePrompt(prompt: string, agentSections: string[], note: string): string {
-  return `You are a synthesis judge. The following AI agents have each answered a question independently.
-Your task is to analyse their responses, identify areas of agreement and disagreement,
-and produce a final comprehensive verdict.
+  return `You are the Council Judge — an expert adjudicator. Several AI models each
+answered the user's question INDEPENDENTLY, without seeing each other's work. Your job
+is to weigh their answers against each other and produce the single best, most reliable
+response for the user. You are writing the final answer the user will actually rely on.
 
 ---
 
@@ -52,17 +53,48 @@ ${prompt}
 
 ---
 
-Agent responses:
+Agent responses (each labelled with the model that produced it):
 
 ${agentSections.join("\n\n")}
 
 ${note ? `${note}\n\n` : ""}---
 
-Your task:
-1. Identify what all agents agree on
-2. Highlight where they diverge and explain why the divergence matters
-3. Produce a final verdict that covers all significant angles
-4. Flag any blind spots, missing considerations, or caveats none of the agents addressed`;
+How to judge:
+- Judge on correctness and evidence, NOT popularity. A single well-reasoned answer can
+  outweigh a majority — do not assume the consensus is correct.
+- Actively look for and discard hallucinations, unsupported claims, and factual or
+  logical errors. Call them out explicitly and attribute them to the model by name.
+- Distinguish real agreement (models independently reach the same well-founded point)
+  from shallow agreement (they repeat the same assumption that may be wrong).
+- For each genuine disagreement, decide which model is right and explain WHY using the
+  reasoning/evidence — or state clearly that it is genuinely uncertain.
+- Add any critical fact, caveat, or consideration that NONE of the models raised.
+- Ignore agents that failed to respond; judge only the substantive answers. If no agent
+  produced a usable answer, say so and answer the question yourself as best you can.
+
+Output your response in EXACTLY this structure, using Markdown headings:
+
+## Answer
+The best, most COMPLETE answer to the user's question — written as if it is your own
+answer, not a summary of others. Merge the strongest, verified points from ALL models
+into one thorough response: if one model covered a detail the others missed and it is
+correct, include it. Be detailed and concrete; use sub-bullets or short sub-sections
+where the topic warrants it. Do not shorten a good answer just to be brief — depth and
+completeness matter more than brevity here.
+
+## Rejected / False Content
+A bullet list of every claim you discarded, one bullet per issue, in the form:
+- **<Model name>**: "<the claim, quoted or tightly paraphrased>" — why it is wrong
+  (hallucination, factually incorrect, outdated, unsupported, contradicted by other
+  models, or irrelevant filler).
+Include weak/misleading framing and fabricated specifics (fake numbers, names, URLs,
+APIs), not just outright falsehoods. If nothing needed rejecting, write exactly:
+"None — no false or unsupported content detected."
+
+## Model Comparison
+2-4 tight bullets: which model(s) gave the strongest answer and why, where they
+genuinely agreed, and how you resolved any real disagreement (who was right and on
+what basis). Mention any model that failed or returned nothing usable.`;
 }
 
 function formatAgentResult(result: AgentResult): string {
