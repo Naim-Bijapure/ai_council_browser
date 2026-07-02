@@ -231,6 +231,107 @@ export async function openAgentTabInUnfocusedWindow(
   return openTabAndListenForReady(url, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, true);
 }
 
+export interface PopupLoadResult extends TabLoadResult {
+  windowId: number | null;
+}
+
+/**
+ * Opens an agent in a dedicated popup window and resolves once the page has
+ * loaded and its content script reports ready. The council runner opens one
+ * agent popup at a time, captures the response, then closes it before moving
+ * to the next agent.
+ *
+ * The popup is created focused: heavy SPAs (Perplexity, Gemini) are throttled
+ * and fail to render their input in occluded/background windows, so the popup
+ * must be the foreground window while it loads and generates. Closing it
+ * afterwards returns focus to the previously focused window.
+ */
+export async function openAgentPopupAndListenForReady(
+  url: string,
+  tabLoadTimeoutMs: number,
+  contentReadyTimeoutMs: number,
+  appKey: AppKey,
+  focused = true
+): Promise<PopupLoadResult> {
+  return new Promise<PopupLoadResult>((resolve) => {
+    let settled = false;
+    let tabId: number | null = null;
+    let windowId: number | null = null;
+    let tabLoaded = false;
+    let contentReady = false;
+
+    const contentReadyDeadline = Date.now() + tabLoadTimeoutMs + contentReadyTimeoutMs;
+
+    const done = (tabUrl: string | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(loadTimer);
+      clearTimeout(readyTimer);
+      browser.tabs.onUpdated.removeListener(tabListener);
+      browser.runtime.onMessage.removeListener(messageListener);
+      resolve({ tabId: tabId ?? -1, windowId, tabUrl, loaded: tabLoaded, contentReady });
+    };
+
+    const maybeResolve = (): void => {
+      if (settled || !tabLoaded || !contentReady || tabId == null) return;
+      void browser.tabs
+        .get(tabId)
+        .then((t) => done(t.url ?? null))
+        .catch(() => done(null));
+    };
+
+    const messageListener = (message: ContentToBgMessage, sender: Browser.runtime.MessageSender) => {
+      if (message.type === "CONTENT_READY" && message.appKey === appKey && sender.tab?.id === tabId) {
+        contentReady = true;
+        maybeResolve();
+      }
+    };
+
+    const tabListener = (
+      updatedTabId: number,
+      changeInfo: Browser.tabs.OnUpdatedInfo,
+      _updatedTab: Browser.tabs.Tab
+    ) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        tabLoaded = true;
+        maybeResolve();
+      }
+    };
+
+    const loadTimer = setTimeout(() => {
+      if (!tabLoaded) done(null);
+    }, tabLoadTimeoutMs);
+
+    const readyTimer = setTimeout(() => {
+      if (!contentReady) done(null);
+    }, contentReadyDeadline - Date.now());
+
+    browser.runtime.onMessage.addListener(messageListener);
+    browser.tabs.onUpdated.addListener(tabListener);
+
+    void browser.windows
+      .create({ url, type: "popup", focused, width: 1024, height: 800 })
+      .then((win) => {
+        if (!win) {
+          done(null);
+          return;
+        }
+        windowId = win.id ?? null;
+        const tab = win.tabs?.[0];
+        tabId = tab?.id ?? null;
+        if (tabId == null) {
+          done(null);
+          return;
+        }
+        if (tab?.status === "complete") {
+          tabLoaded = true;
+          maybeResolve();
+        }
+      })
+      .catch(() => done(null));
+  });
+}
+
 export async function openTabAndWaitForLoad(url: string, timeoutMs: number): Promise<Browser.tabs.Tab> {
   const tab = await browser.tabs.create({ url, active: true });
 

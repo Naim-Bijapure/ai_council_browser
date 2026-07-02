@@ -9,8 +9,8 @@ import {
   type JudgeStep,
   type StoredCouncilSession
 } from "../types";
-import { openTabAndListenForReady, openAgentTabInUnfocusedWindow } from "./diagnostics";
-import { getActiveWindowId, findMatchingTabInWindow, getActiveTabIdInWindow } from "./windowContext";
+import { openTabAndListenForReady, openAgentPopupAndListenForReady } from "./diagnostics";
+import { getActiveWindowId, findMatchingTabInWindow } from "./windowContext";
 import type { BgToContentMessage, ContentToBgMessage } from "./messages";
 import { loadSelectorConfig } from "./selectorConfig";
 import {
@@ -26,10 +26,6 @@ export interface CouncilRunnerCallbacks {
   isCancelled: () => boolean;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 interface ActiveRunState {
   sessionId: string;
   cancelled: boolean;
@@ -37,6 +33,9 @@ interface ActiveRunState {
   tabListeners: Array<() => void>;
   messageListeners: Array<() => void>;
   agentTabIds: Map<AppKey, number>;
+  // The agent popup window currently open (one at a time). Tracked so it can be
+  // closed on cancellation/cleanup.
+  currentAgentWindowId: number | null;
   judgeTabId: number | null;
   judgeWindowId: number | null;
 }
@@ -46,11 +45,9 @@ export async function runCouncil(
   callbacks: CouncilRunnerCallbacks,
   timeouts: AutomationTimeouts = DEFAULT_AUTOMATION_TIMEOUTS
 ): Promise<void> {
-  // Capture the active window and tab before opening agent tabs, so the judge
-  // opens in the same window and we can switch back to the user's tab after
-  // agent injection.
+  // Capture the active window up front so the judge opens in the user's
+  // original window (agents run in their own transient popup windows).
   const judgeWindowId = await getActiveWindowId();
-  const userTabId = judgeWindowId != null ? await getActiveTabIdInWindow(judgeWindowId) : null;
 
   const state: ActiveRunState = {
     sessionId: session.id,
@@ -59,6 +56,7 @@ export async function runCouncil(
     tabListeners: [],
     messageListeners: [],
     agentTabIds: new Map(),
+    currentAgentWindowId: null,
     judgeTabId: null,
     judgeWindowId
   };
@@ -100,118 +98,61 @@ export async function runCouncil(
   try {
     if (checkCancelled()) return;
 
-    // Step 1: Open all agent tabs in parallel (background tabs, no focus steal)
-    const agentTabResults = await Promise.all(
-      agentKeys.map((key) =>
-        openAgentTabInUnfocusedWindow(
-          getSupportedApp(key).newChatUrl,
-          timeouts.tabLoadMs,
-          timeouts.contentReadyMs,
-          key
-        ).catch(() => null)
-      )
-    );
-
-    if (checkCancelled()) return;
-
-    agentKeys.forEach((key, i) => {
-      const result = agentTabResults[i];
-      if (result?.tabId != null) {
-        state.agentTabIds.set(key, result.tabId);
-      }
-    });
-
-    // Switch back to the user's tab after all agent tabs are created.
-    // Agent tabs were opened with active:true so Chrome prioritizes their
-    // page loading; focus returns to the user now while we wait for
-    // content scripts to report ready.
-    if (userTabId != null) {
-      try {
-        await browser.tabs.update(userTabId, { active: true });
-      } catch {
-        // ignore — tab may be closed
-      }
-    }
-
-    // Track first agent URL for agentTabUrl
-    const firstLoaded = agentTabResults.find((r) => r?.tabUrl);
-    if (firstLoaded) {
-      session = update({ agentTabUrl: firstLoaded.tabUrl ?? null });
-    }
-
-    // Step 2: Check readiness for each agent
-    const agentReadiness = agentKeys.map((key, i) => {
-      const result = agentTabResults[i];
-
-      if (!result?.loaded) {
-        updateAgent(key, {
-          status: "error",
-          errorReason: "tab_load_timeout",
-          completedAt: Date.now()
-        });
-        return null;
-      }
-
-      if (!result?.contentReady) {
-        updateAgent(key, {
-          status: "error",
-          errorReason: "content_script_timeout",
-          completedAt: Date.now()
-        });
-        return null;
-      }
-
-      const tabId = state.agentTabIds.get(key);
-      if (tabId == null) {
-        updateAgent(key, {
-          status: "error",
-          errorReason: "tab_load_timeout",
-          completedAt: Date.now()
-        });
-        return null;
-      }
-
-      return { key, tabId };
-    });
-
-    if (checkCancelled()) return;
-
-    // Step 3: Run each agent SEQUENTIALLY (one at a time).
+    // Run each agent SEQUENTIALLY, each in its own dedicated popup window:
+    // open the popup → wait until ready → inject + wait for the full response →
+    // close the popup → move to the next agent.
     //
-    // Why sequential? Chrome heavily throttles background tabs — setTimeout
-    // is clamped to ~1s, the event loop is slowed, and even MutationObserver
-    // callbacks are delayed. This causes response completion detection to
-    // miss the stop-button window and extract only a partial response.
-    //
-    // By running one agent at a time, each agent tab stays foreground for
-    // its entire generation. Chrome gives it full CPU, so the stop button
-    // is detected reliably and the full response is captured.
-    //
-    // Tradeoff: total wall-clock time is the SUM of all agent durations
-    // instead of the MAX. For 2 agents at ~20s each, total = ~40s instead
-    // of ~20s. This is acceptable for reliability.
-
-    for (const ready of agentReadiness) {
-      if (!ready) continue;
-      if (checkCancelled()) break;
-
-      const { key, tabId } = ready;
-
-      // Activate the agent tab so it gets full CPU (no background throttling)
-      try {
-        await browser.tabs.update(tabId, { active: true });
-      } catch {
-        // ignore — tab might be closed
-      }
-      await sleep(500);
-
+    // Why one popup at a time (not all tabs at once)? Chrome heavily throttles
+    // occluded/background pages — timers are clamped and heavy SPAs (Perplexity,
+    // Gemini) fail to render their input. Each popup is opened focused so it is
+    // the foreground window while it loads and generates, then closed, which
+    // returns focus to the user's window. Wall-clock time is the SUM of agent
+    // durations, which is the accepted tradeoff for reliable capture.
+    for (const key of agentKeys) {
       if (checkCancelled()) break;
 
       updateAgent(key, { status: "injecting", startedAt: Date.now() });
 
-      // Send the prompt and WAIT for the full response (sequential, not parallel).
-      // The tab is foreground, so completion detection runs at full speed.
-      const adapterResult = await sendAgentRun(key, tabId, session.prompt, timeouts, state);
+      const popup = await openAgentPopupAndListenForReady(
+        getSupportedApp(key).newChatUrl,
+        timeouts.tabLoadMs,
+        timeouts.contentReadyMs,
+        key
+      ).catch(() => null);
+
+      if (checkCancelled()) {
+        await closeAgentWindow(state, popup?.windowId ?? null);
+        break;
+      }
+
+      if (popup?.windowId != null) {
+        state.currentAgentWindowId = popup.windowId;
+      }
+
+      // Readiness gating.
+      if (!popup || popup.tabId == null || popup.tabId < 0 || !popup.loaded) {
+        updateAgent(key, { status: "error", errorReason: "tab_load_timeout", completedAt: Date.now() });
+        await closeAgentWindow(state, popup?.windowId ?? null);
+        continue;
+      }
+      if (!popup.contentReady) {
+        updateAgent(key, { status: "error", errorReason: "content_script_timeout", completedAt: Date.now() });
+        await closeAgentWindow(state, popup.windowId);
+        continue;
+      }
+
+      state.agentTabIds.set(key, popup.tabId);
+      if (!session.agentTabUrl && popup.tabUrl) {
+        session = update({ agentTabUrl: popup.tabUrl });
+      }
+
+      // Send the prompt and WAIT for the full response. The popup is the
+      // foreground window, so completion detection runs at full speed.
+      const adapterResult = await sendAgentRun(key, popup.tabId, session.prompt, timeouts, state);
+
+      // Capture done — close the popup before moving on.
+      await closeAgentWindow(state, popup.windowId);
+      state.agentTabIds.delete(key);
 
       if (checkCancelled()) break;
 
@@ -899,6 +840,22 @@ async function finalizeSession(
   callbacks.onComplete(finalSession);
 }
 
+/**
+ * Closes an agent popup window (if any) and clears it from the run state.
+ * Safe to call with a null windowId or an already-closed window.
+ */
+async function closeAgentWindow(state: ActiveRunState, windowId: number | null): Promise<void> {
+  if (windowId == null) return;
+  try {
+    await browser.windows.remove(windowId);
+  } catch {
+    // Window may already be closed or gone — ignore.
+  }
+  if (state.currentAgentWindowId === windowId) {
+    state.currentAgentWindowId = null;
+  }
+}
+
 function cleanup(state: ActiveRunState): void {
   state.timers.forEach((t) => clearTimeout(t));
   state.timers = [];
@@ -906,4 +863,12 @@ function cleanup(state: ActiveRunState): void {
   state.tabListeners = [];
   state.messageListeners.forEach((fn) => fn());
   state.messageListeners = [];
+  // Close any agent popup still open (e.g. on cancellation).
+  if (state.currentAgentWindowId != null) {
+    const windowId = state.currentAgentWindowId;
+    state.currentAgentWindowId = null;
+    void browser.windows.remove(windowId).catch(() => {
+      // already closed — ignore
+    });
+  }
 }
