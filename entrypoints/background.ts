@@ -28,13 +28,18 @@ let cancelFlag = false;
 export default defineBackground(() => {
   void configureSidePanel();
 
-  // Content scripts are declared in the manifest, so they inject automatically.
-  // Remove any programmatically-registered content scripts left over from
-  // earlier `wxt dev` runs or a previous version of this extension: those
-  // registrations PERSIST across extension reloads and would inject a second
-  // (stale) copy of the content script into each page, causing the bridge and
-  // prompt injection to run twice — duplicating the injected prompt.
-  void cleanupStaleContentScripts();
+  // PRODUCTION ONLY: content scripts are declared in the manifest, so any
+  // programmatically-registered scripts are stale leftovers from older builds
+  // (their registrations PERSIST across reloads and would inject a second,
+  // stale copy into every page — duplicating the prompt). Remove them.
+  //
+  // In DEV, WXT does NOT declare content scripts in the manifest — it registers
+  // them itself via chrome.scripting for HMR. Running the cleanup there would
+  // unregister WXT's own dev content scripts, so they'd stop injecting and
+  // agents would fail randomly. So we skip it entirely in dev.
+  if (!import.meta.env.DEV) {
+    void cleanupStaleContentScripts();
+  }
 
   browser.runtime.onMessage.addListener((message) => {
     return handlePanelMessage(message as PanelRequest);
