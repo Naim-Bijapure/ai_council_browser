@@ -308,8 +308,17 @@ export function isDisabled(element: HTMLElement): boolean {
     return true;
   }
 
+  // Class-based disabled state (e.g. DeepSeek's `ds-button--disabled`), matched
+  // per-token. Do NOT use a loose /disabled/ test: Tailwind ships `disabled:`
+  // *variant* classes (e.g. `disabled:opacity-50`, `disabled:pointer-events-none`)
+  // that are present in the className at all times and only take effect when the
+  // real `disabled` attribute is set — Claude's enabled Send button carries
+  // several of them, and a loose test would wrongly treat it as disabled.
   const className = typeof element.className === "string" ? element.className : "";
-  if (/disabled/i.test(className)) {
+  const isDisabledClass = className
+    .split(/\s+/)
+    .some((token) => token === "disabled" || token.endsWith("-disabled"));
+  if (isDisabledClass) {
     return true;
   }
 
