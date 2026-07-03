@@ -1,5 +1,7 @@
 import type { SupportedAppWithRoles } from "@/utils/appRegistry";
 import type { AppKey } from "@/utils/types";
+import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DragHandle } from "./DragHandle";
 import { OrderBadge } from "./OrderBadge";
 
@@ -35,26 +37,22 @@ export function AgentItem({
   dragHandleProps,
   onToggle
 }: AgentItemProps) {
-  const itemClassName = [
-    "agent-item",
-    isJudge ? "is-judge" : "",
-    isSelected ? "is-selected" : "",
-    isDragged ? "is-dragged" : "",
-    isDropTarget ? "is-drop-target" : ""
-  ]
-    .filter(Boolean)
-    .join(" ");
-
   return (
-    <div className={itemClassName}>
-      <label className="agent-checkbox-row">
-        <input
-          type="checkbox"
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-md border border-border bg-secondary px-3 py-2 transition-colors",
+        isSelected && "bg-accent border-primary/40",
+        isDragged && "opacity-50 shadow-md",
+        isDropTarget && "border-primary ring-2 ring-primary/20"
+      )}
+    >
+      <label className="flex flex-1 items-center gap-2.5 cursor-pointer">
+        <Checkbox
           checked={isSelected}
-          onChange={onToggle}
+          onCheckedChange={onToggle}
           disabled={isJudge}
         />
-        <span className="agent-name">
+        <span className="text-sm text-foreground">
           {agent.displayName}
           {isJudge ? " (Judge)" : ""}
         </span>

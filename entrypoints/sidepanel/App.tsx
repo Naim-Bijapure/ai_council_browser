@@ -3,6 +3,7 @@ import { browser } from "wxt/browser";
 import {
   formatAgentStatus,
   formatAppName,
+  formatCharacterCount,
   formatSessionStatus,
   formatTimestamp,
   truncateText
@@ -31,6 +32,28 @@ import {
 import type { ProbeResult, ProbeStep } from "../../utils/automation/types";
 import { AgentOrderList } from "./components/AgentOrderList";
 import { reorderAgents } from "../../utils/agentOrdering";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 
 type ActiveTab = "council" | "history";
 
@@ -65,6 +88,17 @@ const APP_LABELS: Record<string, string> = {
   deepseek: "DeepSeek",
   qwen: "Qwen",
   kimi: "Kimi"
+};
+
+// Status → badge variant mapping used across agent/judge/diagnostic cards.
+const STATUS_BADGE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  pending: "outline",
+  injecting: "secondary",
+  waiting: "secondary",
+  sent: "default",
+  done: "default",
+  timeout: "destructive",
+  error: "destructive"
 };
 
 export default function App() {
@@ -285,28 +319,28 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
+    <main className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="flex items-end justify-between gap-3 border-b border-border bg-card px-4 pb-3 pt-4">
         <div>
-          <h1>AI Council</h1>
+          <h1 className="text-lg font-bold tracking-tight text-foreground">AI Council</h1>
           {councilType === "agentJudge" ? (
-            <p>{selectedAgents.length} agent{selectedAgents.length !== 1 ? "s" : ""} &rarr; {formatAppName(judgeKey)} judge</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {selectedAgents.length} agent{selectedAgents.length !== 1 ? "s" : ""} &rarr; {formatAppName(judgeKey)} judge
+            </p>
           ) : (
-            <p>Relay council — configuration coming soon</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Relay council — configuration coming soon</p>
           )}
         </div>
-        <div className="tabs" role="tablist" aria-label="AI Council sections">
-          <button className={activeTab === "council" ? "active" : ""} onClick={() => setActiveTab("council")}>
-            Council
-          </button>
-          <button className={activeTab === "history" ? "active" : ""} onClick={() => setActiveTab("history")}>
-            History
-          </button>
-        </div>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)}>
+          <TabsList aria-label="AI Council sections">
+            <TabsTrigger value="council">Council</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </header>
 
       {activeTab === "council" ? (
-        <section className="panel-section">
+        <section className="flex-1 p-4">
           {activeSession ? (
             <SessionView
               expandedAgent={expandedAgent}
@@ -318,7 +352,7 @@ export default function App() {
             />
           ) : (
             <form
-              className="council-form"
+              className="flex flex-col gap-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (canRun && councilType === "agentJudge") {
@@ -326,49 +360,59 @@ export default function App() {
                 }
               }}
             >
-              <label className="field-label" htmlFor="council-type">Choose council</label>
-              <select
-                id="council-type"
-                value={councilType}
-                onChange={(event) => setCouncilType(event.target.value as CouncilType)}
-              >
-                {(Object.keys(COUNCIL_TYPE_LABELS) as CouncilType[]).map((type) => (
-                  <option key={type} value={type}>
-                    {COUNCIL_TYPE_LABELS[type]}
-                  </option>
-                ))}
-              </select>
-
-              <label className="field-label" htmlFor="prompt">Prompt</label>
-              <textarea
-                id="prompt"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Ask one question for the council..."
-                rows={8}
-              />
-              <div className={promptTooLong ? "counter danger" : "counter"}>
-                {formatCharacterCount(prompt.length, MAX_USER_PROMPT_LENGTH)}
+              <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+                <Label htmlFor="council-type">Choose council</Label>
+                <Select value={councilType} onValueChange={(value) => setCouncilType(value as CouncilType)}>
+                  <SelectTrigger id="council-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(COUNCIL_TYPE_LABELS) as CouncilType[]).map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {COUNCIL_TYPE_LABELS[type]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              {promptTooLong ? <div className="inline-error">Prompt is too long.</div> : null}
+
+              <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+                <Label htmlFor="prompt">Prompt</Label>
+                <Textarea
+                  id="prompt"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Ask one question for the council..."
+                  rows={8}
+                />
+                <div className={cn("self-end text-xs text-muted-foreground", promptTooLong && "text-destructive")}>
+                  {formatCharacterCount(prompt.length, MAX_USER_PROMPT_LENGTH)}
+                </div>
+                {promptTooLong ? <InlineError>Prompt is too long.</InlineError> : null}
+              </div>
 
               {councilType === "agentJudge" ? (
                 <>
-                  <label className="field-label" htmlFor="judge">Judge</label>
-                  <select
-                    id="judge"
-                    value={judgeKey}
-                    onChange={(event) => setJudgeKey(event.target.value as AppKey)}
-                  >
-                    {judgeApps.map((app) => (
-                      <option key={app.key} value={app.key}>
-                        {app.displayName}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+                    <Label htmlFor="judge">Judge</Label>
+                    <Select value={judgeKey} onValueChange={(value) => setJudgeKey(value as AppKey)}>
+                      <SelectTrigger id="judge">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {judgeApps.map((app) => (
+                          <SelectItem key={app.key} value={app.key}>
+                            {app.displayName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                  <fieldset className="option-group">
-                    <legend>Agents</legend>
+                  <fieldset className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+                    <legend className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                      Agents
+                    </legend>
                     <AgentOrderList
                       agents={agentApps}
                       selectedKeys={selectedAgents}
@@ -378,21 +422,22 @@ export default function App() {
                     />
                   </fieldset>
 
-                  <label className="check-row parallel-toggle">
-                    <input
-                      type="checkbox"
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card p-3">
+                    <Checkbox
                       checked={parallelMode}
-                      onChange={(event) => setParallelMode(event.target.checked)}
+                      onCheckedChange={(checked) => setParallelMode(checked === true)}
                     />
-                    <span>Parallel mode — run all agents at once, each in its own popup</span>
+                    <span className="text-sm text-muted-foreground">
+                      Parallel mode — run all agents at once, each in its own popup
+                    </span>
                   </label>
 
-                  {error ? <div className="inline-error">{error}</div> : null}
-                  {selectedAgents.length === 0 ? <div className="inline-error">Select at least one agent.</div> : null}
+                  {error ? <InlineError>{error}</InlineError> : null}
+                  {selectedAgents.length === 0 ? <InlineError>Select at least one agent.</InlineError> : null}
 
-                  <button className="primary-action" disabled={!canRun} type="submit">
+                  <Button disabled={!canRun} type="submit">
                     Run council
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <RelayCouncilPlaceholder
@@ -406,24 +451,24 @@ export default function App() {
 
               {SHOW_DEV_TOOLS && councilType === "agentJudge" ? (
               <>
-              <div className="diagnostic-block">
-                <button
-                  className="secondary-action"
+              <div className="mt-2 flex flex-col gap-2">
+                <Button
+                  variant="secondary"
                   type="button"
                   disabled={diagnosticRunning}
                   onClick={() => void runDiagnostics()}
                 >
                   {diagnosticRunning ? "Running diagnostics…" : "Run diagnostics"}
-                </button>
+                </Button>
                 {diagnostic ? (
-                  <div className="diagnostic-report">
+                  <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
                     {(Object.keys(diagnostic) as AppKey[]).map((key) => {
                       const appDiagnostic = diagnostic[key];
                       if (!appDiagnostic) return null;
                       return (
-                        <div key={key} className="diagnostic-row">
+                        <div key={key} className="flex justify-between text-sm text-foreground">
                           <span>{APP_LABELS[key] ?? key}</span>
-                          <span className={appDiagnostic.ready ? "status-ok" : "status-error"}>
+                          <span className={appDiagnostic.ready ? "font-semibold text-success" : "font-semibold text-destructive"}>
                             {appDiagnostic.ready
                               ? "Ready"
                               : appDiagnostic.errorReason ?? "not ready"}
@@ -435,43 +480,45 @@ export default function App() {
                 ) : null}
               </div>
 
-              <div className="probe-block">
-                <label className="field-label" htmlFor="probe-app">Selector Probe</label>
-                <select
-                  id="probe-app"
-                  value={probeApp}
-                  onChange={(event) => setProbeApp(event.target.value as AppKey)}
-                  disabled={probeRunning}
-                >
-                  {SUPPORTED_APPS.map((app) => (
-                    <option key={app.key} value={app.key}>
-                      {app.displayName}
-                    </option>
-                  ))}
-                </select>
-                <div className="probe-buttons">
-                  <button
-                    className="secondary-action"
+              <div className="mt-2 flex flex-col gap-2">
+                <Label htmlFor="probe-app">Selector Probe</Label>
+                <Select value={probeApp} onValueChange={(value) => setProbeApp(value as AppKey)} disabled={probeRunning}>
+                  <SelectTrigger id="probe-app">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUPPORTED_APPS.map((app) => (
+                      <SelectItem key={app.key} value={app.key}>
+                        {app.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
                     type="button"
                     disabled={probeRunning}
                     onClick={() => void runProbe("static")}
+                    className="flex-1"
                   >
                     Static Probe
-                  </button>
-                  <button
-                    className="secondary-action"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     type="button"
                     disabled={probeRunning}
                     onClick={() => void runProbe("live")}
+                    className="flex-1"
                   >
                     Live Probe
-                  </button>
+                  </Button>
                 </div>
-                {probeRunning ? <div className="probe-status">Probing…</div> : null}
-                {probeError ? <div className="inline-error">{probeError}</div> : null}
+                {probeRunning ? <div className="text-sm italic text-muted-foreground">Probing…</div> : null}
+                {probeError ? <InlineError>{probeError}</InlineError> : null}
                 {probeResult ? (
-                  <div className="probe-results">
-                    <div className="probe-meta">
+                  <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-3">
+                    <div className="mb-1 text-xs text-muted-foreground">
                       {APP_LABELS[probeResult.appKey] ?? probeResult.appKey} · {probeResult.mode} · {probeResult.durationMs}ms
                     </div>
                     {probeResult.steps.map((s, i) => (
@@ -489,6 +536,14 @@ export default function App() {
         <HistoryView history={history} onClearHistory={clearHistory} />
       )}
     </main>
+  );
+}
+
+function InlineError({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+      {children}
+    </div>
   );
 }
 
@@ -515,8 +570,10 @@ function RelayCouncilPlaceholder({
 }: RelayCouncilPlaceholderProps) {
   return (
     <>
-      <fieldset className="option-group">
-        <legend>Relay order</legend>
+      <fieldset className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+        <legend className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+          Relay order
+        </legend>
         <AgentOrderList
           agents={agents}
           selectedKeys={selectedKeys}
@@ -526,15 +583,15 @@ function RelayCouncilPlaceholder({
         />
       </fieldset>
 
-      <div className="coming-soon-note">
+      <div className="rounded-md border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
         Relay council is coming soon — agents will pass their response to the
         next agent in the chain. Selection and ordering are saved, but running
         a relay isn't wired up yet.
       </div>
 
-      <button className="primary-action" disabled type="button">
+      <Button disabled type="button">
         Run relay (coming soon)
-      </button>
+      </Button>
     </>
   );
 }
@@ -563,29 +620,33 @@ function SessionView({
   const totalAgents = session.agentResults.length;
 
   return (
-    <div className="session-view">
-      <div className="prompt-summary">
-        <span>Question</span>
-        <p>{truncateText(session.prompt, 180)}</p>
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-border bg-card p-3">
+        <span className="text-xs text-muted-foreground">Question</span>
+        <p className="mt-1 text-foreground">{truncateText(session.prompt, 180)}</p>
       </div>
 
       {session.status === "running" ? (
-        <div className="progress-block">
-          <progress value={completedAgents} max={totalAgents} />
-          <div className="progress-meta">
+        <div className="grid gap-2">
+          <Progress value={totalAgents > 0 ? (completedAgents / totalAgents) * 100 : 0} />
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>{completedAgents} / {totalAgents} agents complete</span>
           </div>
         </div>
       ) : null}
 
-      <div className="agent-list">
+      <div className="grid gap-2">
         {session.agentResults.map((result) => {
           const hasResult = result.status === "done" && result.responseText;
           const isExpanded = expandedAgent === result.agentKey;
           return (
             <article
               key={result.agentKey}
-              className={`agent-card ${result.status}${hasResult ? " clickable" : ""}`}
+              className={cn(
+                "rounded-md border border-border border-l-[3px] bg-card p-3 transition-colors",
+                AGENT_STATUS_BORDER[result.status] ?? "border-l-muted-foreground",
+                hasResult && "cursor-pointer hover:bg-secondary"
+              )}
               onClick={hasResult ? () => onToggleAgent(isExpanded ? null : result.agentKey) : undefined}
               role={hasResult ? "button" : undefined}
               tabIndex={hasResult ? 0 : undefined}
@@ -596,25 +657,29 @@ function SessionView({
                 }
               } : undefined}
             >
-              <div className="agent-card-header">
-                <strong>{formatAppName(result.agentKey)} (Agent)</strong>
-                <span>{formatAgentStatus(result.status, result.errorReason)}</span>
+              <div className="flex items-center justify-between gap-2">
+                <strong className="text-sm text-foreground">{formatAppName(result.agentKey)} (Agent)</strong>
+                <Badge variant={STATUS_BADGE_VARIANT[result.status] ?? "outline"}>
+                  {formatAgentStatus(result.status, result.errorReason)}
+                </Badge>
               </div>
               {hasResult ? (
-                <p>{truncateText(result.responseText, 150)}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{truncateText(result.responseText, 150)}</p>
               ) : null}
               {result.status === "error" && result.errorReason ? (
-                <p>{formatAgentStatus(result.status, result.errorReason)}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{formatAgentStatus(result.status, result.errorReason)}</p>
               ) : null}
-              {hasResult ? <span className="expand-hint">Click to view full response</span> : null}
+              {hasResult ? <span className="mt-2 block text-[11px] italic text-primary">Click to view full response</span> : null}
             </article>
           );
         })}
 
-        <article className={`agent-card ${judgeStep.status}`}>
-          <div className="agent-card-header">
-            <strong>{formatAppName(session.judgeApp)} (Judge)</strong>
-            <span>{JUDGE_STEP_LABELS[judgeStep.status]}{judgeStep.errorReason ? `: ${judgeStep.errorReason}` : ""}</span>
+        <article className={cn("rounded-md border border-border border-l-[3px] bg-card p-3", AGENT_STATUS_BORDER[judgeStep.status] ?? "border-l-muted-foreground")}>
+          <div className="flex items-center justify-between gap-2">
+            <strong className="text-sm text-foreground">{formatAppName(session.judgeApp)} (Judge)</strong>
+            <Badge variant={STATUS_BADGE_VARIANT[judgeStep.status] ?? "outline"}>
+              {JUDGE_STEP_LABELS[judgeStep.status]}{judgeStep.errorReason ? `: ${judgeStep.errorReason}` : ""}
+            </Badge>
           </div>
         </article>
       </div>
@@ -628,51 +693,62 @@ function SessionView({
       ) : null}
 
       {isHandoff && judgeStep.status === "sent" ? (
-        <div className="handoff">
-          <span>Judge is running in {formatAppName(session.judgeApp)}</span>
-          {session.errorMessage ? <p>{session.errorMessage}</p> : null}
+        <div className="grid gap-3 rounded-lg border border-primary/40 bg-primary/10 p-4">
+          <span className="font-bold text-foreground">Judge is running in {formatAppName(session.judgeApp)}</span>
+          {session.errorMessage ? <p className="text-xs text-muted-foreground">{session.errorMessage}</p> : null}
           {session.judgeChatUrl ? (
-            <p className="judge-url-note">Judge URL captured — switch to the tab to read the verdict.</p>
+            <p className="text-xs text-muted-foreground">Judge URL captured — switch to the tab to read the verdict.</p>
           ) : (
-            <p className="judge-url-note">Judge URL unavailable — check the {formatAppName(session.judgeApp)} tab manually.</p>
+            <p className="text-xs text-muted-foreground">Judge URL unavailable — check the {formatAppName(session.judgeApp)} tab manually.</p>
           )}
-          <div className="action-row">
-            <button className="secondary-action" onClick={() => void onSwitchToJudge()} type="button">
+          <div className="flex items-stretch gap-2">
+            <Button variant="secondary" onClick={() => void onSwitchToJudge()} type="button" className="flex-1">
               Switch to judge tab
-            </button>
-            <button className="primary-action" onClick={() => void onNewQuestion()} type="button">
+            </Button>
+            <Button onClick={() => void onNewQuestion()} type="button" className="flex-1">
               New question
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
 
       {session.status === "partial_failure" ? (
-        <div className="handoff warning">
-          <span>All agents failed — no judge prompt sent.</span>
-          <button className="primary-action" onClick={() => void onNewQuestion()} type="button">
+        <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
+          <span className="font-bold text-foreground">All agents failed — no judge prompt sent.</span>
+          <Button onClick={() => void onNewQuestion()} type="button">
             New question
-          </button>
+          </Button>
         </div>
       ) : null}
 
       {session.status === "error" ? (
-        <div className="handoff warning">
-          <span>Session error: {session.errorMessage ?? "judge step failed"}</span>
-          <button className="primary-action" onClick={() => void onNewQuestion()} type="button">
+        <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
+          <span className="font-bold text-foreground">Session error: {session.errorMessage ?? "judge step failed"}</span>
+          <Button onClick={() => void onNewQuestion()} type="button">
             New question
-          </button>
+          </Button>
         </div>
       ) : null}
 
       {isRunning ? (
-        <button className="danger-action" onClick={() => void onCancel()} type="button">
+        <Button variant="destructive" onClick={() => void onCancel()} type="button" className="mt-2">
           Cancel
-        </button>
+        </Button>
       ) : null}
     </div>
   );
 }
+
+// Maps agent/judge status strings to a left-border accent color utility.
+const AGENT_STATUS_BORDER: Record<string, string> = {
+  pending: "border-l-muted-foreground",
+  injecting: "border-l-primary",
+  waiting: "border-l-primary",
+  done: "border-l-success",
+  sent: "border-l-success",
+  timeout: "border-l-destructive",
+  error: "border-l-destructive"
+};
 
 interface HistoryViewProps {
   history: StoredCouncilSession[];
@@ -686,31 +762,42 @@ function HistoryView({ history, onClearHistory }: HistoryViewProps) {
   }
 
   return (
-    <section className="panel-section history-section">
-      <div className="section-toolbar">
-        <h2>History</h2>
-        <button disabled={history.length === 0} onClick={() => void onClearHistory()} type="button">
+    <section className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-semibold tracking-tight text-foreground">History</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={history.length === 0}
+          onClick={() => void onClearHistory()}
+          type="button"
+        >
           Clear
-        </button>
+        </Button>
       </div>
 
       {history.length === 0 ? (
-        <div className="empty-state">No council sessions yet.</div>
+        <div className="grid min-h-[120px] place-items-center rounded-lg border border-dashed border-border bg-card text-muted-foreground">
+          No council sessions yet.
+        </div>
       ) : (
-        <div className="history-list">
+        <div className="grid gap-2">
           {history.map((session) => (
             <button
-              className={session.judgeChatUrl ? "history-row" : "history-row dimmed"}
+              className={cn(
+                "grid gap-1 rounded-md border border-border bg-card p-3 text-left transition-colors hover:bg-secondary",
+                !session.judgeChatUrl && "opacity-60"
+              )}
               disabled={!session.judgeChatUrl}
               key={session.id ?? `${session.timestamp}-${session.prompt}`}
               onClick={() => void openSession(session)}
               type="button"
             >
-              <span>{truncateText(session.prompt, 80)}</span>
-              <small>
+              <span className="font-semibold text-foreground">{truncateText(session.prompt, 80)}</span>
+              <small className="text-xs text-muted-foreground">
                 {formatTimestamp(session.timestamp)} · {formatSessionStatus(session.status)} · {session.agentsUsed.length} agent{session.agentsUsed.length !== 1 ? "s" : ""} · Judge: {formatAppName(session.judgeApp)}
               </small>
-              {!session.judgeChatUrl ? <em>Judge URL unavailable</em> : null}
+              {!session.judgeChatUrl ? <em className="text-xs text-muted-foreground">Judge URL unavailable</em> : null}
             </button>
           ))}
         </div>
@@ -726,12 +813,19 @@ const PROBE_ICONS: Record<ProbeStep["status"], string> = {
   skip: "→"
 };
 
+const PROBE_ICON_COLOR: Record<ProbeStep["status"], string> = {
+  pass: "text-success",
+  fail: "text-destructive",
+  warn: "text-warning",
+  skip: "text-muted-foreground"
+};
+
 function ProbeStepRow({ step }: { step: ProbeStep }) {
   return (
-    <div className={`probe-row probe-${step.status}`}>
-      <span className="probe-icon">{PROBE_ICONS[step.status]}</span>
-      <span className="probe-field">{step.field}</span>
-      <span className="probe-detail">{step.detail}</span>
+    <div className="grid grid-cols-[20px_90px_1fr] items-baseline gap-1 text-sm">
+      <span className={cn("text-center font-bold", PROBE_ICON_COLOR[step.status])}>{PROBE_ICONS[step.status]}</span>
+      <span className="font-semibold text-muted-foreground">{step.field}</span>
+      <span className="break-words text-foreground">{step.detail}</span>
     </div>
   );
 }
@@ -743,14 +837,6 @@ interface AgentResultPopupProps {
 }
 
 function AgentResultPopup({ agentKey, result, onClose }: AgentResultPopupProps) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   if (!result) return null;
 
   const duration = result.completedAt && result.startedAt
@@ -767,37 +853,36 @@ function AgentResultPopup({ agentKey, result, onClose }: AgentResultPopupProps) 
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{formatAppName(agentKey)} — Full Response</h2>
-          <button className="modal-close" onClick={onClose} type="button" aria-label="Close">×</button>
-        </div>
-        <div className="modal-meta">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-[640px]">
+        <DialogHeader>
+          <DialogTitle>{formatAppName(agentKey)} — Full Response</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-wrap gap-3 border-b border-border bg-card px-4 py-3 text-xs text-muted-foreground">
           <span>Status: {formatAgentStatus(result.status, result.errorReason)}</span>
           <span>Duration: {duration}</span>
           <span>Length: {result.responseText.length.toLocaleString()} chars</span>
         </div>
         {result.responseText ? (
           <>
-            <div className="modal-body">
-              <pre>{result.responseText}</pre>
+            <div className="flex-1 overflow-y-auto px-4 py-4">
+              <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">{result.responseText}</pre>
             </div>
-            <div className="modal-footer">
-              <button className="secondary-action" onClick={() => void copyToClipboard()} type="button">
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => void copyToClipboard()} type="button">
                 Copy
-              </button>
-              <button className="primary-action" onClick={onClose} type="button">
+              </Button>
+              <Button onClick={onClose} type="button">
                 Close
-              </button>
-            </div>
+              </Button>
+            </DialogFooter>
           </>
         ) : (
-          <div className="modal-body">
-            <p>No response text available.</p>
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            <p className="text-foreground">No response text available.</p>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

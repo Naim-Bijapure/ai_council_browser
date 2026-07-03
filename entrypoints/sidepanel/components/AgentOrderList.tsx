@@ -95,7 +95,7 @@ export function AgentOrderList({
   );
 
   return (
-    <div className="agent-order-list" role="list">
+    <div className="flex flex-col gap-2" role="list">
       {orderedAgents.map((agent) => {
         const isSelected = selectedKeys.includes(agent.key);
         const orderIndex = isSelected ? selectedKeys.indexOf(agent.key) + 1 : null;

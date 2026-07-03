@@ -1,3 +1,6 @@
+import { GripVertical } from "lucide-react";
+import { cn } from "@/lib/utils";
+
 interface DragHandleProps {
   disabled: boolean;
   onDragStart: (e: React.DragEvent) => void;
@@ -7,8 +10,8 @@ interface DragHandleProps {
 }
 
 /**
- * Renders a grip/hamburger icon using CSS (three horizontal lines)
- * and serves as the drag source element.
+ * Renders a grip icon (lucide-react GripVertical) and serves as the drag
+ * source element.
  */
 export function DragHandle({
   disabled,
@@ -19,7 +22,10 @@ export function DragHandle({
 }: DragHandleProps) {
   return (
     <div
-      className={`drag-handle ${disabled ? "disabled" : ""}`}
+      className={cn(
+        "flex h-6 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors",
+        disabled ? "opacity-30 cursor-default" : "cursor-grab hover:text-primary active:cursor-grabbing"
+      )}
       draggable={!disabled}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -29,9 +35,7 @@ export function DragHandle({
       aria-label="Drag to reorder"
       tabIndex={disabled ? -1 : 0}
     >
-      <span className="drag-handle-line" />
-      <span className="drag-handle-line" />
-      <span className="drag-handle-line" />
+      <GripVertical className="h-4 w-4" />
     </div>
   );
 }

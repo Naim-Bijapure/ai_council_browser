@@ -1,8 +1,12 @@
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "wxt";
 
 export default defineConfig({
   manifestVersion: 3,
   modules: ["@wxt-dev/module-react"],
+  vite: () => ({
+    plugins: [tailwindcss()]
+  }),
   webExt: {
     disabled: process.env.WXT_MANUAL_DEV === "true",
     binaries: {

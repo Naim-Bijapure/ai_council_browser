@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge";
+
 interface OrderBadgeProps {
   index: number; // 1-based position
 }
@@ -8,8 +10,8 @@ interface OrderBadgeProps {
  */
 export function OrderBadge({ index }: OrderBadgeProps) {
   return (
-    <span className="order-badge" aria-label={`Position ${index}`}>
+    <Badge aria-label={`Position ${index}`} className="min-w-[22px] justify-center">
       {index}
-    </span>
+    </Badge>
   );
 }
