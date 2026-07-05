@@ -108,6 +108,7 @@ export default function App() {
   const [selectedAgents, setSelectedAgents] = useState<AppKey[]>(DEFAULT_AGENT_KEYS);
   const [judgeKey, setJudgeKey] = useState<AppKey>(DEFAULT_JUDGE_KEY);
   const [parallelMode, setParallelMode] = useState(false);
+  const [silentMode, setSilentMode] = useState(false);
   const [snapshot, setSnapshot] = useState<CouncilSnapshot>(idleSnapshot);
   const [history, setHistory] = useState<StoredCouncilSession[]>([]);
   const [error, setError] = useState("");
@@ -155,7 +156,7 @@ export default function App() {
     if (!loading) {
       void savePreferences();
     }
-  }, [councilType, selectedAgents, judgeKey, parallelMode]);
+  }, [councilType, selectedAgents, judgeKey, parallelMode, silentMode]);
 
   async function sendMessage(request: PanelRequest): Promise<PanelResponse> {
     return browser.runtime.sendMessage(request);
@@ -180,6 +181,7 @@ export default function App() {
           setJudgeKey(response.preferences.judgeKey);
         }
         setParallelMode(response.preferences.parallelMode === true);
+        setSilentMode(response.preferences.silentMode !== false);
       }
     } else {
       setError(response.error);
@@ -193,7 +195,8 @@ export default function App() {
       councilType,
       selectedAgentKeys: selectedAgents,
       judgeKey,
-      parallelMode
+      parallelMode,
+      silentMode
     };
     await sendMessage({ type: "SAVE_PREFERENCES", preferences });
   }
@@ -234,7 +237,8 @@ export default function App() {
         prompt,
         agentKeys: selectedAgents,
         judgeKey,
-        parallelMode
+        parallelMode,
+        silentMode
       }
     });
 
@@ -431,6 +435,40 @@ export default function App() {
                       Parallel mode — run all agents at once, each in its own popup
                     </span>
                   </label>
+
+                  <fieldset className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+                    <legend className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                      Tab Mode
+                    </legend>
+                    <div className="flex gap-3">
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="radio"
+                          name="silentMode"
+                          value="active"
+                          checked={silentMode === false}
+                          onChange={() => setSilentMode(false)}
+                          className="h-4 w-4 accent-primary"
+                        />
+                        <span className="text-sm text-muted-foreground">
+                          Active — tabs open in foreground
+                        </span>
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="radio"
+                          name="silentMode"
+                          value="silent"
+                          checked={silentMode === true}
+                          onChange={() => setSilentMode(true)}
+                          className="h-4 w-4 accent-primary"
+                        />
+                        <span className="text-sm text-muted-foreground">
+                          Silent — tabs open in background
+                        </span>
+                      </label>
+                    </div>
+                  </fieldset>
 
                   {error ? <InlineError>{error}</InlineError> : null}
                   {selectedAgents.length === 0 ? <InlineError>Select at least one agent.</InlineError> : null}

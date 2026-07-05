@@ -20,12 +20,12 @@ import {
   type SendConfirmationResult
 } from "./types";
 
-// Whether each agent popup is created focused. Focused = reliable: heavy SPAs
-// (Perplexity, Gemini, Qwen, Claude) are throttled and fail to render their
-// input in an occluded/unfocused window, so the popup must be the foreground
-// window while it loads and generates. Set to false to keep popups from
-// stealing focus, at the risk of those SPAs failing with "could not find input".
-const AGENT_POPUP_FOCUSED = true;
+// Get whether agent popups should be created focused based on session settings.
+// When silentMode is true, popups open in background (focused=false).
+// When silentMode is false (default), popups open in foreground (focused=true).
+function getAgentPopupFocused(session: ActiveCouncilSession): boolean {
+  return session.silentMode !== true;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -134,7 +134,7 @@ export async function runCouncil(
             timeouts.tabLoadMs,
             timeouts.contentReadyMs,
             key,
-            AGENT_POPUP_FOCUSED,
+            getAgentPopupFocused(session),
             { left: 60 + index * 48, top: 60 + index * 48 }
           ).catch(() => null);
 
@@ -217,7 +217,7 @@ export async function runCouncil(
             timeouts.tabLoadMs,
             timeouts.contentReadyMs,
             key,
-            AGENT_POPUP_FOCUSED
+            getAgentPopupFocused(session)
           ).catch(() => null);
           if (popup?.windowId != null) {
             popupWindowId = popup.windowId;
@@ -263,18 +263,6 @@ export async function runCouncil(
         state.agentTabIds.set(key, popupTabId);
         if (!session.agentTabUrl && tabUrl) {
           session = update({ agentTabUrl: tabUrl });
-        }
-
-        // Re-raise the window and let it settle so the page is visible before
-        // injecting. Submission clicks the send button (focus-independent), so
-        // this is best-effort rather than required.
-        if (AGENT_POPUP_FOCUSED && popupWindowId != null) {
-          try {
-            await browser.windows.update(popupWindowId, { focused: true });
-          } catch {
-            // ignore — window may have been closed
-          }
-          await sleep(600);
         }
 
         // Send the prompt and WAIT for the full response.
@@ -670,16 +658,16 @@ async function openJudgeTabAndListenForReady(
   if (targetWindowId != null) {
     const { tabId: matchingTabId, matches } = await findMatchingTabInWindow(targetWindowId, appKey);
     if (matches && matchingTabId != null) {
-      await browser.tabs.update(matchingTabId, { url: newChatUrl });
-      return openTabAndListenForReadyOnExistingTab(matchingTabId, newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey);
+      await browser.tabs.update(matchingTabId, { url: newChatUrl, active: true });
+      return openTabAndListenForReadyOnExistingTab(matchingTabId, newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, true);
     }
 
     // No matching tab; create a new tab in the captured window
-    return openTabAndListenForReadyInWindow(targetWindowId, newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey);
+    return openTabAndListenForReadyInWindow(targetWindowId, newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, false);
   }
 
   // Fallback: open in a new window (previous behavior)
-  return openTabAndListenForReady(newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey);
+  return openTabAndListenForReady(newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, false);
 }
 
 function openTabAndListenForReadyOnExistingTab(
@@ -687,7 +675,8 @@ function openTabAndListenForReadyOnExistingTab(
   newChatUrl: string,
   tabLoadTimeoutMs: number,
   contentReadyTimeoutMs: number,
-  appKey: AppKey
+  appKey: AppKey,
+  focused: boolean = true
 ): Promise<{ tabId: number; tabUrl: string | null; loaded: boolean; contentReady: boolean }> {
   return new Promise<{ tabId: number; tabUrl: string | null; loaded: boolean; contentReady: boolean }>((resolve) => {
     let settled = false;
@@ -801,7 +790,8 @@ function openTabAndListenForReadyInWindow(
   url: string,
   tabLoadTimeoutMs: number,
   contentReadyTimeoutMs: number,
-  appKey: AppKey
+  appKey: AppKey,
+  focused: boolean = true
 ): Promise<{ tabId: number; tabUrl: string | null; loaded: boolean; contentReady: boolean }> {
   return new Promise<{ tabId: number; tabUrl: string | null; loaded: boolean; contentReady: boolean }>((resolve) => {
     let settled = false;
@@ -893,7 +883,7 @@ function openTabAndListenForReadyInWindow(
     browser.runtime.onMessage.addListener(messageListener);
     browser.tabs.onUpdated.addListener(tabListener);
 
-    void browser.tabs.create({ url, active: true, windowId }).then((tab) => {
+    void browser.tabs.create({ url, active: focused, windowId }).then((tab) => {
       tabId = tab.id ?? null;
 
       if (tab.status === "complete") {

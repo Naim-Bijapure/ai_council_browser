@@ -64,6 +64,9 @@ export interface CouncilPreferences {
   // When true, all agents run at once, each in its own popup window, instead
   // of the default one-at-a-time single-popup flow.
   parallelMode: boolean;
+  // When true, agent tabs open in background (silent mode). When false, tabs
+  // open in foreground (active mode).
+  silentMode: boolean;
 }
 
 export interface AgentResult {
@@ -88,6 +91,7 @@ export interface ActiveCouncilSession {
   status: SessionStatus;
   durationMs: number;
   parallelMode?: boolean;
+  silentMode?: boolean;
   judgePrompt?: string;
   errorMessage?: string;
 }
@@ -112,6 +116,7 @@ export interface RunCouncilRequest {
   agentKeys: AppKey[];
   judgeKey: AppKey;
   parallelMode?: boolean;
+  silentMode?: boolean;
 }
 
 export type PanelRequest =

@@ -86,7 +86,7 @@ export async function openTabAndListenForReady(
   tabLoadTimeoutMs: number,
   contentReadyTimeoutMs: number,
   appKey: AppKey,
-  focused = true
+  focused: boolean = false
 ): Promise<TabLoadResult> {
   return new Promise<TabLoadResult>((resolve) => {
     let settled = false;

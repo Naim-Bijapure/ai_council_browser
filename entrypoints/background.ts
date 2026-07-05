@@ -150,7 +150,8 @@ async function startCouncil(request: RunCouncilRequest): Promise<PanelResponse> 
     agentTabUrl: null,
     status: "running",
     durationMs: 0,
-    parallelMode: request.parallelMode === true
+    parallelMode: request.parallelMode === true,
+    silentMode: request.silentMode !== false
   };
 
   cancelFlag = false;
