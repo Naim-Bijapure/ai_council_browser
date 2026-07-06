@@ -8,6 +8,7 @@ import type { ProbeMode, ProbeResult as AutomationProbeResult } from "../utils/a
 import { DEFAULT_AUTOMATION_TIMEOUTS } from "../utils/automation/types";
 import { getPreferences, savePreferences } from "../utils/preferences";
 import { clearSessions, listSessions } from "../utils/history";
+import { isActiveCouncilRun } from "../utils/sessionState";
 import {
   MAX_USER_PROMPT_LENGTH,
   type ActiveCouncilSession,
@@ -93,7 +94,7 @@ async function handlePanelMessage(message: PanelRequest): Promise<PanelResponse>
       return cancelCouncil();
 
     case "SKIP_AGENT": {
-      if (activeSession && isActiveCouncilRun(activeSession.status)) {
+      if (activeSession && isActiveCouncilRun(activeSession)) {
         skipAgentFlag = message.agentKey;
       }
       return { ok: true, snapshot: getSnapshot() };
@@ -134,8 +135,16 @@ async function startCouncil(request: RunCouncilRequest): Promise<PanelResponse> 
     return { ok: false, error: validationError, snapshot: getSnapshot() };
   }
 
-  if (activeSession && isActiveCouncilRun(activeSession.status)) {
+  if (activeSession && isActiveCouncilRun(activeSession)) {
     return { ok: false, error: "A council session is already running", snapshot: getSnapshot() };
+  }
+
+  // A finished or failed session still occupies the panel until the user starts
+  // fresh — clear it automatically when they submit a new run.
+  if (activeSession && !isActiveCouncilRun(activeSession)) {
+    activeSession = null;
+    cancelFlag = false;
+    skipAgentFlag = null;
   }
 
   const agentKeys = request.agentKeys;
@@ -214,12 +223,8 @@ function createPendingAgentResult(agentKey: AppKey): AgentResult {
   };
 }
 
-function isActiveCouncilRun(status: ActiveCouncilSession["status"]): boolean {
-  return status === "running" || status === "judge_handoff";
-}
-
 async function cancelCouncil(): Promise<PanelResponse> {
-  if (!activeSession || !isActiveCouncilRun(activeSession.status)) {
+  if (!activeSession || !isActiveCouncilRun(activeSession)) {
     return { ok: true, snapshot: getSnapshot() };
   }
 

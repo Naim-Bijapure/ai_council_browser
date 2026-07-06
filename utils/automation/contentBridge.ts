@@ -125,6 +125,11 @@ export function createContentScriptBridge(appKey: AppKey, handlers: ContentScrip
         handlers.onCancel();
         return Promise.resolve();
 
+      case "NUDGE_READY":
+        if (message.appKey !== appKey) return Promise.resolve();
+        sendContentReadyWithRetry();
+        return Promise.resolve();
+
       default:
         return Promise.resolve();
     }

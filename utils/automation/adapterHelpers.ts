@@ -1,10 +1,10 @@
 import type { AppKey } from "../types";
 import type { SelectorGroup } from "./types";
 
-const CHATGPT_CHUNK_CHAR_THRESHOLD = 8_000;
-const CHATGPT_CHUNK_LINE_THRESHOLD = 120;
-const CHATGPT_CHUNK_LINES = 40;
-const CHATGPT_CHUNK_DELAY_MS = 5;
+const LARGE_PROMPT_CHAR_THRESHOLD = 8_000;
+const LARGE_PROMPT_LINE_THRESHOLD = 120;
+const CHUNK_LINE_COUNT = 40;
+const CHUNK_DELAY_MS = 5;
 
 export interface SetInputTextOptions {
   appKey?: AppKey;
@@ -46,22 +46,21 @@ export async function expandChatGptLongPromptPreview(): Promise<boolean> {
 
 async function insertTextInChunks(element: HTMLElement, text: string): Promise<void> {
   const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i += CHATGPT_CHUNK_LINES) {
-    const chunk = lines.slice(i, i + CHATGPT_CHUNK_LINES).join("\n");
-    const suffix = i + CHATGPT_CHUNK_LINES < lines.length ? "\n" : "";
+  for (let i = 0; i < lines.length; i += CHUNK_LINE_COUNT) {
+    const chunk = lines.slice(i, i + CHUNK_LINE_COUNT).join("\n");
+    const suffix = i + CHUNK_LINE_COUNT < lines.length ? "\n" : "";
     if (typeof document.execCommand === "function") {
       document.execCommand("insertText", false, chunk + suffix);
     }
-    if (CHATGPT_CHUNK_DELAY_MS > 0) {
-      await sleep(CHATGPT_CHUNK_DELAY_MS);
+    if (CHUNK_DELAY_MS > 0) {
+      await sleep(CHUNK_DELAY_MS);
     }
   }
 }
 
-function shouldUseChunkedChatGptInsert(appKey: AppKey | undefined, text: string): boolean {
-  if (appKey !== "chatgpt") return false;
+function shouldUseChunkedInsert(text: string): boolean {
   const lineCount = text.split("\n").length;
-  return text.length >= CHATGPT_CHUNK_CHAR_THRESHOLD || lineCount >= CHATGPT_CHUNK_LINE_THRESHOLD;
+  return text.length >= LARGE_PROMPT_CHAR_THRESHOLD || lineCount >= LARGE_PROMPT_LINE_THRESHOLD;
 }
 
 export interface GenerationActivityState {
@@ -173,7 +172,7 @@ export async function setInputText(
     // cleared too (a plain `textContent = ""` desyncs them).
     clearContentEditable(element);
 
-    if (shouldUseChunkedChatGptInsert(options?.appKey, text)) {
+    if (shouldUseChunkedInsert(text)) {
       await insertTextInChunks(element, text);
       element.dispatchEvent(
         new InputEvent("input", {

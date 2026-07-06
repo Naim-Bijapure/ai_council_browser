@@ -79,6 +79,11 @@ function trimDraft(draft: string, maxChars: number): string {
 
 const RELAY_JUDGE_PROMPT_LIMIT = 15_000;
 const SEVERE_STEP_LIMIT = 2_000;
+const JUDGE_STEP_CONTENT_LIMIT = 4_000;
+const JUDGE_FINAL_DRAFT_LIMIT = 6_000;
+const TRIM_SUFFIX = "...";
+const MIN_TRIMMED_SECTION_LENGTH = SEVERE_STEP_LIMIT + TRIM_SUFFIX.length;
+const MAX_TRIM_ITERATIONS = 64;
 
 interface BuildRelayJudgePromptInput {
   prompt: string;
@@ -93,10 +98,10 @@ export interface RelayJudgePromptResult {
 
 export function buildRelayJudgePrompt(input: BuildRelayJudgePromptInput): RelayJudgePromptResult {
   let stepSections = input.agentResults.map(formatRelayStep);
-  let finalDraft = input.finalDraft;
+  let finalDraft = truncateForJudgeStep(input.finalDraft, JUDGE_FINAL_DRAFT_LIMIT);
   let note = "";
   let text = composeRelayJudgePrompt(input.prompt, stepSections, finalDraft, note);
-  let trimmed = false;
+  let trimmed = finalDraft.length < input.finalDraft.length;
 
   if (text.length > RELAY_JUDGE_PROMPT_LIMIT) {
     trimmed = true;
@@ -106,7 +111,9 @@ export function buildRelayJudgePrompt(input: BuildRelayJudgePromptInput): RelayJ
 
     if (text.length > RELAY_JUDGE_PROMPT_LIMIT) {
       stepSections = stepSections.map((section) =>
-        section.length > SEVERE_STEP_LIMIT ? `${section.slice(0, SEVERE_STEP_LIMIT)}...` : section
+        section.length > MIN_TRIMMED_SECTION_LENGTH
+          ? `${section.slice(0, SEVERE_STEP_LIMIT)}${TRIM_SUFFIX}`
+          : section
       );
       text = composeRelayJudgePrompt(input.prompt, stepSections, finalDraft, note);
     }
@@ -124,6 +131,13 @@ export function buildRelayJudgePrompt(input: BuildRelayJudgePromptInput): RelayJ
   }
 
   return { text, trimmed };
+}
+
+export async function buildRelayJudgePromptAsync(
+  input: BuildRelayJudgePromptInput
+): Promise<RelayJudgePromptResult> {
+  await Promise.resolve();
+  return buildRelayJudgePrompt(input);
 }
 
 function composeRelayJudgePrompt(
@@ -177,6 +191,11 @@ If nothing needed changing, write: "None — the final draft was sound."
 and whether the final draft is trustworthy.`;
 }
 
+function truncateForJudgeStep(text: string, limit = JUDGE_STEP_CONTENT_LIMIT): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}${TRIM_SUFFIX}`;
+}
+
 function formatRelayStep(result: AgentResult): string {
   const appName = getSupportedApp(result.agentKey).displayName;
   const role = result.relayRole === "author" ? "Author" : "Reviewer";
@@ -184,10 +203,10 @@ function formatRelayStep(result: AgentResult): string {
   if (result.status === "done") {
     const parts = [`### Step — ${appName} (${role})`];
     if (result.critiqueText) {
-      parts.push(`**Critique:**\n${result.critiqueText}`);
+      parts.push(`**Critique:**\n${truncateForJudgeStep(result.critiqueText)}`);
     }
     const answer = result.revisedAnswerText ?? result.responseText;
-    parts.push(`**Revised answer:**\n${answer}`);
+    parts.push(`**Revised answer:**\n${truncateForJudgeStep(answer)}`);
     return parts.join("\n\n");
   }
 
@@ -210,7 +229,12 @@ function trimRelaySections(
 ): string[] {
   const next = [...sections];
 
-  while (composeRelayJudgePrompt(prompt, next, finalDraft, note).length > RELAY_JUDGE_PROMPT_LIMIT) {
+  for (let iteration = 0; iteration < MAX_TRIM_ITERATIONS; iteration++) {
+    const composedLength = composeRelayJudgePrompt(prompt, next, finalDraft, note).length;
+    if (composedLength <= RELAY_JUDGE_PROMPT_LIMIT) {
+      break;
+    }
+
     let longestIndex = 0;
     next.forEach((section, index) => {
       if (section.length > next[longestIndex].length) {
@@ -219,15 +243,18 @@ function trimRelaySections(
     });
 
     const longest = next[longestIndex];
-    if (longest.length <= SEVERE_STEP_LIMIT) {
+    if (longest.length <= MIN_TRIMMED_SECTION_LENGTH) {
       break;
     }
 
-    const reduceBy = Math.max(
-      250,
-      Math.ceil((composeRelayJudgePrompt(prompt, next, finalDraft, note).length - RELAY_JUDGE_PROMPT_LIMIT) / 2)
-    );
-    next[longestIndex] = `${longest.slice(0, Math.max(SEVERE_DRAFT_LIMIT, longest.length - reduceBy))}...`;
+    const reduceBy = Math.max(250, Math.ceil((composedLength - RELAY_JUDGE_PROMPT_LIMIT) / 2));
+    const targetLength = Math.max(SEVERE_STEP_LIMIT, longest.length - reduceBy);
+    const trimmed = `${longest.slice(0, targetLength)}${TRIM_SUFFIX}`;
+    if (trimmed.length >= longest.length) {
+      break;
+    }
+
+    next[longestIndex] = trimmed;
   }
 
   return next;

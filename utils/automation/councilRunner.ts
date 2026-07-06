@@ -1,8 +1,9 @@
 import { browser } from "wxt/browser";
 import { getSupportedApp } from "../appRegistry";
-import { buildJudgePrompt } from "../judgePrompt";
+import { isCapturableChatUrl, isNewChatUrl } from "../chatUrl";
+import { buildJudgePromptAsync } from "../judgePrompt";
 import { saveSession } from "../history";
-import { buildAuthorPrompt, buildRelayJudgePrompt, buildReviewerPrompt } from "../relayPrompt";
+import { buildAuthorPrompt, buildRelayJudgePromptAsync, buildReviewerPrompt } from "../relayPrompt";
 import { parseRelayResponse } from "../relayResponseParser";
 import {
   type ActiveCouncilSession,
@@ -261,7 +262,7 @@ export async function runCouncil(
           const tab = await browser.tabs.get(state.councilTabId);
           const currentUrl = tab.url ?? "";
           // Only use the URL if it's different from the new-chat URL
-          if (currentUrl && currentUrl !== url && !isNewChatUrl(currentUrl, url)) {
+          if (isCapturableChatUrl(currentUrl, url)) {
             agentChatUrl = currentUrl;
           }
         } catch {
@@ -344,24 +345,28 @@ export async function runCouncil(
     // "Waiting…" while we build a potentially large relay judge prompt or
     // navigate the council tab to the judge app.
     session = update({ status: "judge_handoff" });
-    updateJudge({ status: "injecting", startedAt: Date.now() });
+    updateJudge({ status: "injecting", startedAt: Date.now(), detail: "preparing_prompt" });
+
+    await sleep(0);
 
     const judgePrompt = isRelay
-      ? buildRelayJudgePrompt({
+      ? await buildRelayJudgePromptAsync({
           prompt: session.prompt,
           agentResults: session.agentResults,
           finalDraft: currentDraft
         })
-      : buildJudgePrompt({
+      : await buildJudgePromptAsync({
           prompt: session.prompt,
           agentResults: session.agentResults
         });
 
     session = update({ judgePrompt: judgePrompt.text });
+    updateJudge({ detail: "opening_tab" });
 
     // Step 6: Navigate the council tab to the judge URL (reuse same tab)
     const judgeKey = session.judgeApp;
     const judgeNewChatUrl = getSupportedApp(judgeKey).newChatUrl;
+    const judgePhaseDeadline = Date.now() + JUDGE_PHASE_TIMEOUT_MS;
 
     if (state.councilTabId == null) {
       // Council tab was closed — open a new one
@@ -434,10 +439,28 @@ export async function runCouncil(
 
     if (await abortIfCancelled(session, callbacks, state, checkCancelled)) return;
 
+    if (Date.now() > judgePhaseDeadline) {
+      updateJudge({
+        status: "error",
+        errorReason: "timeout",
+        completedAt: Date.now()
+      });
+      await finalizeSession(session, callbacks, state);
+      return;
+    }
+
     // Judge phase already marked "injecting" above (includes tab prep).
     // We now perform the actual prompt injection + send confirmation.
+    updateJudge({ detail: "sending" });
     const judgeSendResult = state.judgeTabId != null
-      ? await sendJudgeRun(judgeKey, state.judgeTabId, judgePrompt.text, timeouts, state)
+      ? await sendJudgeRun(
+          judgeKey,
+          state.judgeTabId,
+          judgePrompt.text,
+          timeouts,
+          state,
+          judgePhaseDeadline
+        )
       : { sent: false, errorReason: "tab_load_timeout" as const };
     if (await abortIfCancelled(session, callbacks, state, checkCancelled)) return;
 
@@ -453,21 +476,16 @@ export async function runCouncil(
 
     updateJudge({ status: "sent", completedAt: Date.now() });
 
-    // Capture URL AFTER response completion to get the final conversation URL.
-    // SPAs may change URLs multiple times during a conversation, so we read
-    // the current URL only after the response is complete.
-    let judgeUrl: string | null = null;
+    // Capture the judge conversation URL. SPAs often update the address bar a
+    // few seconds after submit, so prefer the content-script URL and poll the tab.
+    let judgeUrl: string | null = judgeSendResult.chatUrl ?? null;
     if (state.judgeTabId != null) {
-      try {
-        const tab = await browser.tabs.get(state.judgeTabId);
-        const currentUrl = tab.url ?? "";
-        // Only use the URL if it's different from the new-chat URL
-        if (currentUrl && currentUrl !== judgeNewChatUrl && !isNewChatUrl(currentUrl, judgeNewChatUrl)) {
-          judgeUrl = currentUrl;
-        }
-      } catch {
-        // Tab may have been closed — ignore
-      }
+      judgeUrl = await waitForCapturableChatUrl(
+        state.judgeTabId,
+        judgeNewChatUrl,
+        timeouts.urlCaptureMs,
+        judgeUrl
+      );
     }
 
     if (await abortIfCancelled(session, callbacks, state, checkCancelled)) return;
@@ -486,7 +504,9 @@ export async function runCouncil(
   }
 }
 
-const JUDGE_SEND_TIMEOUT_MS = 45_000;
+const JUDGE_SEND_TIMEOUT_MS = 90_000;
+const JUDGE_PHASE_TIMEOUT_MS = 180_000;
+const CONTENT_READY_NUDGE_INTERVAL_MS = 4_000;
 
 async function sendCancelToTab(tabId: number, appKey: AppKey): Promise<void> {
   const message: BgToContentMessage = { type: "CANCEL", appKey };
@@ -619,15 +639,19 @@ async function sendJudgeRun(
   tabId: number,
   prompt: string,
   timeouts: AutomationTimeouts,
-  state: ActiveRunState
+  state: ActiveRunState,
+  deadlineMs?: number
 ): Promise<SendConfirmationResult> {
   const selectors = loadSelectorConfig(appKey).selectors;
+  const waitMs = deadlineMs
+    ? Math.max(5_000, Math.min(JUDGE_SEND_TIMEOUT_MS, deadlineMs - Date.now()))
+    : JUDGE_SEND_TIMEOUT_MS;
 
   return new Promise<SendConfirmationResult>((resolve) => {
     const timer = setTimeout(() => {
       removeMessageListener();
       resolve({ sent: false, errorReason: "timeout" });
-    }, JUDGE_SEND_TIMEOUT_MS);
+    }, waitMs);
 
     const listener = (message: ContentToBgMessage, sender: Browser.runtime.MessageSender) => {
       if (message.type === "SEND_CONFIRMED" && message.appKey === appKey && sender.tab?.id === tabId) {
@@ -662,7 +686,24 @@ async function sendJudgeRun(
 
 function isOnTargetChatUrl(tabUrl: string | undefined, newChatUrl: string): boolean {
   if (!tabUrl) return false;
-  return tabUrl === newChatUrl || isNewChatUrl(tabUrl, newChatUrl);
+  if (tabUrl === newChatUrl || isNewChatUrl(tabUrl, newChatUrl)) return true;
+
+  try {
+    const parsed = new URL(tabUrl);
+    const target = new URL(newChatUrl);
+    // SPAs often redirect / to /chat or similar after load — same origin is enough
+    // once navigation to the judge/agent app has completed.
+    return parsed.origin === target.origin;
+  } catch {
+    return false;
+  }
+}
+
+async function nudgeContentReady(tabId: number, appKey: AppKey): Promise<void> {
+  const message: BgToContentMessage = { type: "NUDGE_READY", appKey };
+  await browser.tabs.sendMessage(tabId, message).catch(() => {
+    // Content script may not be injected yet.
+  });
 }
 
 function openTabAndListenForReadyOnExistingTab(
@@ -685,6 +726,8 @@ function openTabAndListenForReadyOnExistingTab(
       settled = true;
       clearTimeout(loadTimer);
       clearTimeout(readyTimer);
+      clearTimeout(absoluteTimer);
+      clearInterval(nudgeTimer);
       browser.tabs.onUpdated.removeListener(tabListener);
       browser.runtime.onMessage.removeListener(messageListener);
       resolve({
@@ -757,6 +800,17 @@ function openTabAndListenForReadyOnExistingTab(
         finish();
       }
     }, contentReadyDeadline - Date.now());
+
+    const absoluteTimer = setTimeout(() => {
+      finish();
+    }, contentReadyDeadline - Date.now() + 5_000);
+
+    const nudgeTimer = setInterval(() => {
+      if (settled || contentReady) return;
+      if (tabLoaded) {
+        void nudgeContentReady(tabId, appKey);
+      }
+    }, CONTENT_READY_NUDGE_INTERVAL_MS);
 
     browser.runtime.onMessage.addListener(messageListener);
     browser.tabs.onUpdated.addListener(tabListener);
@@ -892,15 +946,46 @@ function openTabAndListenForReadyInWindow(
   });
 }
 
-function isNewChatUrl(url: string, newChatUrl: string): boolean {
-  if (url === newChatUrl) return true;
-  try {
-    const parsed = new URL(url);
-    const newParsed = new URL(newChatUrl);
-    return parsed.origin === newParsed.origin && parsed.pathname === newParsed.pathname && !parsed.search;
-  } catch {
-    return false;
+async function waitForCapturableChatUrl(
+  tabId: number,
+  newChatUrl: string,
+  timeoutMs: number,
+  initialUrl?: string | null
+): Promise<string | null> {
+  if (initialUrl && isCapturableChatUrl(initialUrl, newChatUrl)) {
+    return initialUrl;
   }
+
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      const currentUrl = tab.url ?? "";
+      if (isCapturableChatUrl(currentUrl, newChatUrl)) {
+        return currentUrl;
+      }
+    } catch {
+      return initialUrl && isCapturableChatUrl(initialUrl, newChatUrl) ? initialUrl : null;
+    }
+    await sleep(400);
+  }
+
+  try {
+    const tab = await browser.tabs.get(tabId);
+    const currentUrl = tab.url ?? "";
+    if (isCapturableChatUrl(currentUrl, newChatUrl)) {
+      return currentUrl;
+    }
+    // Last resort: keep the live tab URL so history can reopen the judge tab.
+    if (currentUrl.startsWith("http")) {
+      return currentUrl;
+    }
+  } catch {
+    // Tab closed — fall through.
+  }
+
+  return initialUrl && isCapturableChatUrl(initialUrl, newChatUrl) ? initialUrl : null;
 }
 
 async function finalizeSession(
@@ -913,10 +998,17 @@ async function finalizeSession(
   const judgeSent = session.judgeStep.status === "sent";
 
   let status: ActiveCouncilSession["status"];
+  let errorMessage = session.errorMessage;
+
   if (judgeSent) {
     status = session.judgeChatUrl ? "done" : "partial";
   } else if (anyAgentDone) {
     status = "partial_failure";
+    if (!errorMessage && session.judgeStep.status === "error") {
+      errorMessage = session.judgeStep.errorReason
+        ? `Judge step failed: ${session.judgeStep.errorReason}`
+        : "Judge step failed";
+    }
   } else {
     status = "error";
   }
@@ -924,7 +1016,8 @@ async function finalizeSession(
   const finalSession: ActiveCouncilSession = {
     ...session,
     status,
-    durationMs
+    durationMs,
+    ...(errorMessage ? { errorMessage } : {})
   };
 
   await saveSession(toStoredSession(finalSession));

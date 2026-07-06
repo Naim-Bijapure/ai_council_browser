@@ -32,6 +32,7 @@ export interface AdapterResult {
 export interface SendConfirmationResult {
   sent: boolean;
   errorReason?: string;
+  chatUrl?: string;
 }
 
 export interface ReadinessResult {

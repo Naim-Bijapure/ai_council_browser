@@ -21,9 +21,13 @@ import {
   waitForSendButtonEnabled,
   type GenerationActivityState
 } from "./adapterHelpers";
+import { getSupportedApp } from "../appRegistry";
+import { isCapturableChatUrl } from "../chatUrl";
 import type { AdapterResult, AutomationTimeouts, SendConfirmationResult, SelectorGroup } from "./types";
 import { DEFAULT_AUTOMATION_TIMEOUTS } from "./types";
 import type { AppKey } from "../types";
+
+const JUDGE_URL_CAPTURE_MS = 15_000;
 
 /**
  * Returns true for `<textarea>` and `<input>` elements — the only input types
@@ -472,11 +476,30 @@ async function runJudgeInner(
     }
   }
 
-  // Step 6: Confirm message sent
+  // Step 6: Confirm message sent, then wait briefly for SPA URL updates.
   log(appKey, "Confirming message sent...");
   const confirmed = await confirmMessageSent(appKey, selectors, submissionSnapshot, inputElement);
-  log(appKey, "Send confirmation result", confirmed);
-  return confirmed;
+  if (!confirmed.sent) {
+    log(appKey, "Send confirmation result", confirmed);
+    return confirmed;
+  }
+
+  const landingUrl = getSupportedApp(appKey).newChatUrl;
+  let chatUrl = window.location.href;
+  const captureDeadline = Date.now() + JUDGE_URL_CAPTURE_MS;
+
+  while (Date.now() < captureDeadline) {
+    const href = window.location.href;
+    if (isCapturableChatUrl(href, landingUrl, submissionSnapshot.urlBeforeSend)) {
+      chatUrl = href;
+      break;
+    }
+    await sleep(300);
+  }
+
+  const result = { sent: true as const, chatUrl };
+  log(appKey, "Send confirmation result", result);
+  return result;
 }
 
 interface ResponseWaitResult {
@@ -701,7 +724,7 @@ async function confirmMessageSent(
     try {
       if (inputElement && checkSubmissionSignals(selectors, inputElement, snapshot)) {
         log(appKey, "  Confirmed: submission signal (user message/stop/input/send)");
-        return { sent: true };
+        return { sent: true, chatUrl: window.location.href };
       }
     } catch {
       // Non-fatal; fall through to other signals.
@@ -709,7 +732,7 @@ async function confirmMessageSent(
 
     if (window.location.href !== snapshot.urlBeforeSend) {
       log(appKey, "  Confirmed: URL changed");
-      return { sent: true };
+      return { sent: true, chatUrl: window.location.href };
     }
 
     await sleep(SEND_CONFIRMATION_POLL_MS);

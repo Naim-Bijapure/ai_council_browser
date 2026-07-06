@@ -4,10 +4,12 @@ import {
   formatAgentStatus,
   formatAppName,
   formatCharacterCount,
+  formatErrorReason,
   formatSessionStatus,
   formatTimestamp,
   truncateText
 } from "../../utils/format";
+import { isActiveCouncilRun } from "../../utils/sessionState";
 import {
   DEFAULT_AGENT_KEYS,
   DEFAULT_JUDGE_KEY,
@@ -23,6 +25,7 @@ import {
   type CouncilSnapshot,
   type CouncilType,
   type DiagnosticReport,
+  type JudgeStepDetail,
   type JudgeStepStatus,
   type PanelRequest,
   type PanelResponse,
@@ -74,6 +77,19 @@ const JUDGE_STEP_LABELS: Record<JudgeStepStatus, string> = {
   timeout: "Judge timed out"
 };
 
+const JUDGE_DETAIL_LABELS: Record<JudgeStepDetail, string> = {
+  preparing_prompt: "Preparing judge prompt…",
+  opening_tab: "Opening judge tab…",
+  sending: "Sending judge prompt…"
+};
+
+function formatJudgeStepLabel(status: JudgeStepStatus, detail?: JudgeStepDetail): string {
+  if (status === "injecting" && detail) {
+    return JUDGE_DETAIL_LABELS[detail];
+  }
+  return JUDGE_STEP_LABELS[status];
+}
+
 const COUNCIL_TYPE_LABELS: Record<CouncilType, string> = {
   agentJudge: "Agent → Judge Council",
   relay: "Relay Council"
@@ -121,7 +137,7 @@ export default function App() {
   const [expandedAgent, setExpandedAgent] = useState<AppKey | null>(null);
 
   const activeSession = snapshot.state === "active" ? snapshot.session : null;
-  const isRunning = activeSession?.status === "running" || activeSession?.status === "judge_handoff";
+  const isRunning = activeSession ? isActiveCouncilRun(activeSession) : false;
   const promptTooLong = prompt.length > MAX_USER_PROMPT_LENGTH;
   const canRun = prompt.trim().length > 0 && !promptTooLong && !isRunning && !loading && selectedAgents.length > 0;
 
@@ -342,12 +358,19 @@ export default function App() {
               : `Relay: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} judge`}
           </p>
         </div>
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)}>
-          <TabsList aria-label="AI Council sections">
-            <TabsTrigger value="council">Council</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-2">
+          {activeSession && !isRunning ? (
+            <Button variant="outline" size="sm" onClick={() => void newQuestion()} type="button">
+              New question
+            </Button>
+          ) : null}
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)}>
+            <TabsList aria-label="AI Council sections">
+              <TabsTrigger value="council">Council</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </header>
 
       {activeTab === "council" ? (
@@ -709,7 +732,8 @@ function SessionView({
           <div className="flex items-center justify-between gap-2">
             <strong className="text-sm text-foreground">{formatAppName(session.judgeApp)} (Judge)</strong>
             <Badge variant={STATUS_BADGE_VARIANT[judgeStep.status] ?? "outline"}>
-              {JUDGE_STEP_LABELS[judgeStep.status]}{judgeStep.errorReason ? `: ${judgeStep.errorReason}` : ""}
+              {formatJudgeStepLabel(judgeStep.status, judgeStep.detail)}
+              {judgeStep.errorReason ? `: ${formatErrorReason(judgeStep.errorReason)}` : ""}
             </Badge>
           </div>
         </article>
@@ -743,9 +767,26 @@ function SessionView({
         </div>
       ) : null}
 
-      {session.status === "partial_failure" ? (
+      {judgeStep.status === "error" || judgeStep.status === "timeout" ? (
         <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
-          <span className="font-bold text-foreground">Judge step failed — no judge prompt was sent (agents may have succeeded).</span>
+          <span className="font-bold text-foreground">
+            Judge step failed
+            {judgeStep.errorReason ? `: ${formatErrorReason(judgeStep.errorReason)}` : ""}
+          </span>
+          <p className="text-xs text-muted-foreground">
+            Agent results were saved. Start a new question to run the council again.
+          </p>
+          <Button onClick={() => void onNewQuestion()} type="button">
+            New question
+          </Button>
+        </div>
+      ) : null}
+
+      {session.status === "partial_failure" && judgeStep.status !== "error" && judgeStep.status !== "timeout" ? (
+        <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
+          <span className="font-bold text-foreground">
+            {session.errorMessage ?? "Judge step failed — no judge prompt was sent (agents may have succeeded)."}
+          </span>
           <Button onClick={() => void onNewQuestion()} type="button">
             New question
           </Button>
@@ -754,7 +795,7 @@ function SessionView({
 
       {session.status === "error" ? (
         <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
-          <span className="font-bold text-foreground">Session error: {session.errorMessage ?? "judge step failed"}</span>
+          <span className="font-bold text-foreground">Session error: {session.errorMessage ?? "Council run failed"}</span>
           <Button onClick={() => void onNewQuestion()} type="button">
             New question
           </Button>
@@ -765,7 +806,11 @@ function SessionView({
         <Button variant="destructive" onClick={() => void onCancel()} type="button" className="mt-2">
           Cancel
         </Button>
-      ) : null}
+      ) : (
+        <Button onClick={() => void onNewQuestion()} type="button" className="mt-2">
+          New question
+        </Button>
+      )}
     </div>
   );
 }
