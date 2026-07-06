@@ -8,8 +8,8 @@ export default defineContentScript({
   runAt: "document_idle",
   main() {
     createContentScriptBridge("kimi", {
-      async onAgentRun(prompt, selectors) {
-        return runAgent("kimi", prompt, selectors);
+      async onAgentRun(prompt, selectors, onSubmitted) {
+        return runAgent("kimi", prompt, selectors, onSubmitted);
       },
       async onJudgeRun(prompt, selectors) {
         return runJudge("kimi", prompt, selectors);

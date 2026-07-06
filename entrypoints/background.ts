@@ -24,6 +24,7 @@ import {
 
 let activeSession: ActiveCouncilSession | null = null;
 let cancelFlag = false;
+let skipAgentFlag: AppKey | null = null;
 
 export default defineBackground(() => {
   void configureSidePanel();
@@ -91,9 +92,17 @@ async function handlePanelMessage(message: PanelRequest): Promise<PanelResponse>
     case "CANCEL_COUNCIL":
       return cancelCouncil();
 
+    case "SKIP_AGENT": {
+      if (activeSession && activeSession.status === "running") {
+        skipAgentFlag = message.agentKey;
+      }
+      return { ok: true, snapshot: getSnapshot() };
+    }
+
     case "NEW_QUESTION":
       activeSession = null;
       cancelFlag = false;
+      skipAgentFlag = null;
       await broadcastSnapshot();
       return { ok: true, snapshot: getSnapshot() };
 
@@ -149,12 +158,11 @@ async function startCouncil(request: RunCouncilRequest): Promise<PanelResponse> 
     judgeStep,
     agentTabUrl: null,
     status: "running",
-    durationMs: 0,
-    parallelMode: request.parallelMode === true,
-    silentMode: request.silentMode !== false
+    durationMs: 0
   };
 
   cancelFlag = false;
+  skipAgentFlag = null;
 
   await broadcastSnapshot();
 
@@ -167,7 +175,9 @@ async function startCouncil(request: RunCouncilRequest): Promise<PanelResponse> 
       activeSession = session;
       void broadcastSnapshot();
     },
-    isCancelled: () => cancelFlag
+    isCancelled: () => cancelFlag,
+    getSkipAgent: () => skipAgentFlag,
+    clearSkipAgent: () => { skipAgentFlag = null; }
   }, DEFAULT_AUTOMATION_TIMEOUTS, request.windowId);
 
   return { ok: true, snapshot: getSnapshot() };

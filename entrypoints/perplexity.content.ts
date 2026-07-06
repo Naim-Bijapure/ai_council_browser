@@ -8,8 +8,8 @@ export default defineContentScript({
   runAt: "document_idle",
   main() {
     createContentScriptBridge("perplexity", {
-      async onAgentRun(prompt, selectors) {
-        return runAgent("perplexity", prompt, selectors);
+      async onAgentRun(prompt, selectors, onSubmitted) {
+        return runAgent("perplexity", prompt, selectors, onSubmitted);
       },
       async onJudgeRun(prompt, selectors) {
         return runJudge("perplexity", prompt, selectors);

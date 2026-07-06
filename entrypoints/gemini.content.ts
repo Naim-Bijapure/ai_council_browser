@@ -8,8 +8,8 @@ export default defineContentScript({
   runAt: "document_idle",
   main() {
     createContentScriptBridge("gemini", {
-      async onAgentRun(prompt, selectors) {
-        return runAgent("gemini", prompt, selectors);
+      async onAgentRun(prompt, selectors, onSubmitted) {
+        return runAgent("gemini", prompt, selectors, onSubmitted);
       },
       async onJudgeRun(prompt, selectors) {
         return runJudge("gemini", prompt, selectors);

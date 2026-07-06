@@ -8,8 +8,8 @@ export default defineContentScript({
   runAt: "document_idle",
   main() {
     createContentScriptBridge("deepseek", {
-      async onAgentRun(prompt, selectors) {
-        return runAgent("deepseek", prompt, selectors);
+      async onAgentRun(prompt, selectors, onSubmitted) {
+        return runAgent("deepseek", prompt, selectors, onSubmitted);
       },
       async onJudgeRun(prompt, selectors) {
         return runJudge("deepseek", prompt, selectors);

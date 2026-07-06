@@ -8,8 +8,8 @@ export default defineContentScript({
   runAt: "document_idle",
   main() {
     createContentScriptBridge("chatgpt", {
-      async onAgentRun(prompt, selectors) {
-        return runAgent("chatgpt", prompt, selectors);
+      async onAgentRun(prompt, selectors, onSubmitted) {
+        return runAgent("chatgpt", prompt, selectors, onSubmitted);
       },
       async onJudgeRun(prompt, selectors) {
         return runJudge("chatgpt", prompt, selectors);

@@ -4,7 +4,7 @@ import type { AdapterResult, ProbeMode, ProbeResult, ReadinessResult, SelectorGr
 import type { AppKey } from "../types";
 
 export interface ContentScriptHandlers {
-  onAgentRun: (prompt: string, selectors: SelectorGroup) => Promise<AdapterResult>;
+  onAgentRun: (prompt: string, selectors: SelectorGroup, onSubmitted?: () => void) => Promise<AdapterResult>;
   onJudgeRun: (prompt: string, selectors: SelectorGroup) => Promise<SendConfirmationResult>;
   onDiagnosticCheck: (selectors: SelectorGroup) => Promise<ReadinessResult>;
   onProbeRun: (mode: ProbeMode, selectors: SelectorGroup) => Promise<ProbeResult>;
@@ -42,7 +42,9 @@ export function createContentScriptBridge(appKey: AppKey, handlers: ContentScrip
         if (message.appKey !== appKey) return Promise.resolve();
         console.log(`[ContentBridge:${appKey}] AGENT_RUN received`, { promptLength: message.prompt.length });
         return handlers
-          .onAgentRun(message.prompt, message.selectors)
+          .onAgentRun(message.prompt, message.selectors, () => {
+            void sendToBg({ type: "SUBMITTED", appKey });
+          })
           .then((result) => {
             if (cancelled) return;
             console.log(`[ContentBridge:${appKey}] AGENT_RUN result`, result);

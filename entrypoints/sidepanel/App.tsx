@@ -37,7 +37,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -107,8 +106,6 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [selectedAgents, setSelectedAgents] = useState<AppKey[]>(DEFAULT_AGENT_KEYS);
   const [judgeKey, setJudgeKey] = useState<AppKey>(DEFAULT_JUDGE_KEY);
-  const [parallelMode, setParallelMode] = useState(false);
-  const [silentMode, setSilentMode] = useState(false);
   const [snapshot, setSnapshot] = useState<CouncilSnapshot>(idleSnapshot);
   const [history, setHistory] = useState<StoredCouncilSession[]>([]);
   const [error, setError] = useState("");
@@ -156,7 +153,7 @@ export default function App() {
     if (!loading) {
       void savePreferences();
     }
-  }, [councilType, selectedAgents, judgeKey, parallelMode, silentMode]);
+  }, [councilType, selectedAgents, judgeKey]);
 
   async function sendMessage(request: PanelRequest): Promise<PanelResponse> {
     return browser.runtime.sendMessage(request);
@@ -180,8 +177,6 @@ export default function App() {
         if (response.preferences.judgeKey) {
           setJudgeKey(response.preferences.judgeKey);
         }
-        setParallelMode(response.preferences.parallelMode === true);
-        setSilentMode(response.preferences.silentMode !== false);
       }
     } else {
       setError(response.error);
@@ -194,9 +189,7 @@ export default function App() {
     const preferences: CouncilPreferences = {
       councilType,
       selectedAgentKeys: selectedAgents,
-      judgeKey,
-      parallelMode,
-      silentMode
+      judgeKey
     };
     await sendMessage({ type: "SAVE_PREFERENCES", preferences });
   }
@@ -247,8 +240,6 @@ export default function App() {
         prompt,
         agentKeys: selectedAgents,
         judgeKey,
-        parallelMode,
-        silentMode,
         windowId
       }
     });
@@ -435,50 +426,6 @@ export default function App() {
                       onToggle={toggleAgent}
                       onReorder={handleReorder}
                     />
-                  </fieldset>
-
-                  <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card p-3">
-                    <Checkbox
-                      checked={parallelMode}
-                      onCheckedChange={(checked) => setParallelMode(checked === true)}
-                    />
-                    <span className="text-sm text-muted-foreground">
-                      Parallel mode — run all agents at once, each in its own popup
-                    </span>
-                  </label>
-
-                  <fieldset className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
-                    <legend className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                      Tab Mode
-                    </legend>
-                    <div className="flex gap-3">
-                      <label className="flex cursor-pointer items-center gap-2">
-                        <input
-                          type="radio"
-                          name="silentMode"
-                          value="active"
-                          checked={silentMode === false}
-                          onChange={() => setSilentMode(false)}
-                          className="h-4 w-4 accent-primary"
-                        />
-                        <span className="text-sm text-muted-foreground">
-                          Active — tabs open in foreground
-                        </span>
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2">
-                        <input
-                          type="radio"
-                          name="silentMode"
-                          value="silent"
-                          checked={silentMode === true}
-                          onChange={() => setSilentMode(true)}
-                          className="h-4 w-4 accent-primary"
-                        />
-                        <span className="text-sm text-muted-foreground">
-                          Silent — tabs open in background
-                        </span>
-                      </label>
-                    </div>
                   </fieldset>
 
                   {error ? <InlineError>{error}</InlineError> : null}

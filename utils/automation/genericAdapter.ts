@@ -16,6 +16,16 @@ import type { AdapterResult, SendConfirmationResult, SelectorGroup } from "./typ
 import { DEFAULT_AUTOMATION_TIMEOUTS } from "./types";
 import type { AppKey } from "../types";
 
+/**
+ * Returns true for `<textarea>` and `<input>` elements — the only input types
+ * where dispatching an Enter KeyboardEvent is a safe submit fallback.
+ * For contenteditable divs (Claude, Gemini, ChatGPT, Perplexity, Kimi) Enter
+ * inserts a newline rather than submitting, so the Enter backup must be skipped.
+ */
+function isTextInput(element: HTMLElement): boolean {
+  return element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement;
+}
+
 const STOP_BUTTON_POLL_INTERVAL_MS = 500;
 // How long to wait for the input element to render. Agents now open in a fresh
 // popup window per run (cold start), so heavy SPAs (Gemini, Qwen, Claude) need
@@ -59,15 +69,46 @@ function log(appKey: AppKey, stage: string, detail?: unknown): void {
 }
 
 /**
- * Polls for up to `pollMs` to detect whether a submission succeeded.
- * Signals checked (in priority order):
- *   1. Stop/completion button appeared (generation started)
+ * Check the 4 submission signals once and return true if any is detected.
+ */
+function checkSubmissionSignals(selectors: SelectorGroup, inputElement: HTMLElement): boolean {
+  // 1. Stop/completion button visible
+  if (selectors.completion.length > 0) {
+    const stopButton = queryFirstSelector(selectors.completion);
+    if (stopButton) return true;
+  }
+  // 2. Response container has started populating
+  const responseContainer = getResponseContainer(selectors.response);
+  if (hasResponseStarted(responseContainer)) return true;
+  // 3. Send button became disabled or disappeared
+  const sendButton = queryFirstSelector(selectors.send) as HTMLElement | null;
+  if (!sendButton || isDisabled(sendButton)) return true;
+  // 4. Input was cleared
+  const remainingText =
+    inputElement instanceof HTMLTextAreaElement || inputElement instanceof HTMLInputElement
+      ? inputElement.value
+      : (inputElement.innerText ?? inputElement.textContent ?? "");
+  if (!remainingText.trim()) return true;
+  return false;
+}
+
+/**
+ * Detect whether a submission succeeded by watching for DOM mutations.
+ *
+ * Uses MutationObserver on document.body (childList + subtree + characterData)
+ * as the PRIMARY signal — MutationObserver callbacks fire even in throttled
+ * background tabs, unlike setTimeout which Chrome clamps to ~1s. A setInterval
+ * backup (also fires in background, though throttled) and a setTimeout hard
+ * deadline ensure the function always resolves.
+ *
+ * Signals checked on every mutation / interval tick:
+ *   1. Stop/completion button appeared
  *   2. Response container has non-empty text
  *   3. Send button became disabled or disappeared
- *   4. Input was cleared (text emptied)
+ *   4. Input was cleared
  *
- * Returns true as soon as any signal is detected, or false if the polling
- * window expires without any signal.
+ * Returns true as soon as any signal is detected, or false if the deadline
+ * expires without any signal.
  */
 async function didSubmissionStart(
   selectors: SelectorGroup,
@@ -75,34 +116,41 @@ async function didSubmissionStart(
   pollMs: number = 5_000,
   intervalMs: number = 200
 ): Promise<boolean> {
-  const deadline = Date.now() + pollMs;
+  // Fast path — check immediately before setting up observers
+  if (checkSubmissionSignals(selectors, inputElement)) return true;
 
-  while (Date.now() < deadline) {
-    // 1. Stop/completion button visible
-    if (selectors.completion.length > 0) {
-      const stopButton = queryFirstSelector(selectors.completion);
-      if (stopButton) return true;
-    }
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
 
-    // 2. Response container has started populating
-    const responseContainer = getResponseContainer(selectors.response);
-    if (hasResponseStarted(responseContainer)) return true;
+    const finish = (result: boolean): void => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearInterval(intervalId);
+      clearTimeout(deadlineTimer);
+      resolve(result);
+    };
 
-    // 3. Send button became disabled or disappeared
-    const sendButton = queryFirstSelector(selectors.send) as HTMLElement | null;
-    if (!sendButton || isDisabled(sendButton)) return true;
+    const check = (): void => {
+      if (checkSubmissionSignals(selectors, inputElement)) {
+        finish(true);
+      }
+    };
 
-    // 4. Input was cleared
-    const remainingText =
-      inputElement instanceof HTMLTextAreaElement || inputElement instanceof HTMLInputElement
-        ? inputElement.value
-        : (inputElement.innerText ?? inputElement.textContent ?? "");
-    if (!remainingText.trim()) return true;
+    // Primary: MutationObserver — fires even in throttled background tabs
+    const observer = new MutationObserver(() => check());
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
 
-    await sleep(intervalMs);
-  }
+    // Backup: setInterval — throttled to ~1s in background but still fires
+    const intervalId = setInterval(check, intervalMs);
 
-  return false;
+    // Hard deadline
+    const deadlineTimer = setTimeout(() => finish(false), pollMs);
+  });
 }
 
 // Guards against a second run being started while one is already in flight for
@@ -115,7 +163,8 @@ let runInFlight = false;
 export async function runAgent(
   appKey: AppKey,
   prompt: string,
-  selectors: SelectorGroup
+  selectors: SelectorGroup,
+  onSubmitted?: () => void
 ): Promise<AdapterResult> {
   if (runInFlight) {
     log(appKey, "Ignoring duplicate agent run — one already in flight");
@@ -123,7 +172,7 @@ export async function runAgent(
   }
   runInFlight = true;
   try {
-    return await runAgentInner(appKey, prompt, selectors);
+    return await runAgentInner(appKey, prompt, selectors, onSubmitted);
   } finally {
     runInFlight = false;
   }
@@ -132,7 +181,8 @@ export async function runAgent(
 async function runAgentInner(
   appKey: AppKey,
   prompt: string,
-  selectors: SelectorGroup
+  selectors: SelectorGroup,
+  onSubmitted?: () => void
 ): Promise<AdapterResult> {
   log(appKey, "Starting agent run", { promptLength: prompt.length });
 
@@ -187,15 +237,32 @@ async function runAgentInner(
     // Check if the click actually submitted — poll for stop button / response start.
     const submitted = await didSubmissionStart(selectors, inputElement);
     if (!submitted) {
-      log(appKey, "Send button click didn't submit — trying Enter-key backup...");
-      submitViaEnterKey(inputElement);
+      if (isTextInput(inputElement)) {
+        log(appKey, "Send button click didn't submit — trying Enter-key backup...");
+        submitViaEnterKey(inputElement);
+      } else {
+        log(appKey, "Send button click didn't submit — skipping Enter backup (contenteditable, would insert newline)");
+      }
     }
   } else {
     // Fallback: submit via Enter key (works for Antd onPressEnter, React onKeyDown, etc.)
-    log(appKey, "Send button not found or disabled — trying Enter-key fallback...");
-    submitViaEnterKey(inputElement);
-    log(appKey, "Enter key dispatched");
-    await sleep(500);
+    if (isTextInput(inputElement)) {
+      log(appKey, "Send button not found or disabled — trying Enter-key fallback...");
+      submitViaEnterKey(inputElement);
+      log(appKey, "Enter key dispatched");
+      await sleep(500);
+    } else {
+      log(appKey, "Send button not found or disabled — skipping Enter fallback (contenteditable)");
+    }
+  }
+
+  // Notify background that submission has been attempted — the background
+  // can now switch the user's tab back (silent mode) while the response
+  // completes in the background via MutationObserver.
+  try {
+    onSubmitted?.();
+  } catch {
+    // ignore callback errors
   }
 
   // Step 6: Wait for response
@@ -293,14 +360,22 @@ async function runJudgeInner(
 
     const submitted = await didSubmissionStart(selectors, inputElement);
     if (!submitted) {
-      log(appKey, "Send button click didn't submit — trying Enter-key backup...");
-      submitViaEnterKey(inputElement);
+      if (isTextInput(inputElement)) {
+        log(appKey, "Send button click didn't submit — trying Enter-key backup...");
+        submitViaEnterKey(inputElement);
+      } else {
+        log(appKey, "Send button click didn't submit — skipping Enter backup (contenteditable)");
+      }
     }
   } else {
-    log(appKey, "Send button not found or disabled — trying Enter-key fallback...");
-    submitViaEnterKey(inputElement);
-    log(appKey, "Enter key dispatched");
-    await sleep(500);
+    if (isTextInput(inputElement)) {
+      log(appKey, "Send button not found or disabled — trying Enter-key fallback...");
+      submitViaEnterKey(inputElement);
+      log(appKey, "Enter key dispatched");
+      await sleep(500);
+    } else {
+      log(appKey, "Send button not found or disabled — skipping Enter fallback (contenteditable)");
+    }
   }
 
   // Step 6: Confirm message sent

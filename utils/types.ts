@@ -4,7 +4,7 @@ export const MAX_USER_PROMPT_LENGTH = 10_000;
 
 export type AppKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "qwen" | "kimi" | "perplexity";
 
-export type AgentStatus = "pending" | "injecting" | "waiting" | "done" | "timeout" | "error";
+export type AgentStatus = "pending" | "injecting" | "waiting" | "done" | "timeout" | "error" | "skipped";
 
 export type SessionStatus =
   | "idle"
@@ -28,7 +28,8 @@ export type AgentErrorReason =
   | "demo_error"
   | "config_error"
   | "send_failed"
-  | "cancelled";
+  | "cancelled"
+  | "skipped";
 
 export type JudgeStepStatus =
   | "pending"
@@ -61,12 +62,6 @@ export interface CouncilPreferences {
   councilType: CouncilType;
   selectedAgentKeys: AppKey[];
   judgeKey: AppKey;
-  // When true, all agents run at once, each in its own popup window, instead
-  // of the default one-at-a-time single-popup flow.
-  parallelMode: boolean;
-  // When true, agent tabs open in background (silent mode). When false, tabs
-  // open in foreground (active mode).
-  silentMode: boolean;
 }
 
 export interface AgentResult {
@@ -76,6 +71,7 @@ export interface AgentResult {
   errorReason?: AgentErrorReason | string;
   startedAt: number;
   completedAt: number | null;
+  chatUrl?: string;
 }
 
 export interface ActiveCouncilSession {
@@ -90,8 +86,6 @@ export interface ActiveCouncilSession {
   agentTabUrl: string | null;
   status: SessionStatus;
   durationMs: number;
-  parallelMode?: boolean;
-  silentMode?: boolean;
   judgePrompt?: string;
   errorMessage?: string;
 }
@@ -115,8 +109,6 @@ export interface RunCouncilRequest {
   prompt: string;
   agentKeys: AppKey[];
   judgeKey: AppKey;
-  parallelMode?: boolean;
-  silentMode?: boolean;
   windowId?: number;
 }
 
@@ -125,6 +117,7 @@ export type PanelRequest =
   | { type: "SAVE_PREFERENCES"; preferences: CouncilPreferences }
   | { type: "RUN_COUNCIL"; request: RunCouncilRequest }
   | { type: "CANCEL_COUNCIL" }
+  | { type: "SKIP_AGENT"; agentKey: AppKey }
   | { type: "NEW_QUESTION" }
   | { type: "SWITCH_TO_JUDGE" }
   | { type: "GET_HISTORY" }

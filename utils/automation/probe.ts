@@ -15,6 +15,10 @@ import type { ProbeField, ProbeMode, ProbeResult, ProbeStep, ProbeStepStatus, Se
 import { DEFAULT_AUTOMATION_TIMEOUTS } from "./types";
 import type { AppKey } from "../types";
 
+function isTextInput(element: HTMLElement): boolean {
+  return element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement;
+}
+
 const PROBE_TEST_PROMPT = "Say hello";
 const PROBE_SEND_BUTTON_TIMEOUT_MS = 5_000;
 const PROBE_RESPONSE_WAIT_MS = 30_000;
@@ -162,13 +166,21 @@ export async function runProbeLive(appKey: AppKey, selectors: SelectorGroup): Pr
     // Poll for stop button / response start as confirmation of submission.
     const submitted = await pollForSubmissionStart(selectors, inputElement);
     if (!submitted) {
-      submitViaEnterKey(inputElement);
-      steps.push(step("send_click", "warn", "send button click didn't submit — Enter-key backup sent"));
+      if (isTextInput(inputElement)) {
+        submitViaEnterKey(inputElement);
+        steps.push(step("send_click", "warn", "send button click didn't submit — Enter-key backup sent"));
+      } else {
+        steps.push(step("send_click", "warn", "send button click didn't submit — Enter backup skipped (contenteditable)"));
+      }
     }
   } else {
-    steps.push(step("send_click", "warn", "send button not found — trying Enter-key fallback"));
-    submitViaEnterKey(inputElement);
-    await sleep(500);
+    if (isTextInput(inputElement)) {
+      steps.push(step("send_click", "warn", "send button not found — trying Enter-key fallback"));
+      submitViaEnterKey(inputElement);
+      await sleep(500);
+    } else {
+      steps.push(step("send_click", "warn", "send button not found — Enter fallback skipped (contenteditable)"));
+    }
   }
 
   const responseResult = await waitForProbeResponseCompletion(selectors);
@@ -189,34 +201,59 @@ export async function runProbeLive(appKey: AppKey, selectors: SelectorGroup): Pr
   return { appKey, mode: "live", steps, durationMs: Date.now() - startTime };
 }
 
+function checkProbeSubmissionSignals(selectors: SelectorGroup, inputElement: HTMLElement): boolean {
+  if (selectors.completion.length > 0) {
+    const stopButton = queryFirstSelector(selectors.completion);
+    if (stopButton) return true;
+  }
+  const responseContainer = getResponseContainer(selectors.response);
+  if (hasResponseStarted(responseContainer)) return true;
+  const sendButton = queryFirstSelector(selectors.send) as HTMLElement | null;
+  if (!sendButton || isDisabled(sendButton)) return true;
+  const remainingText =
+    inputElement instanceof HTMLTextAreaElement || inputElement instanceof HTMLInputElement
+      ? inputElement.value
+      : (inputElement.innerText ?? inputElement.textContent ?? "");
+  if (!remainingText.trim()) return true;
+  return false;
+}
+
 async function pollForSubmissionStart(
   selectors: SelectorGroup,
   inputElement: HTMLElement,
   pollMs: number = 5_000,
   intervalMs: number = 200
 ): Promise<boolean> {
-  const deadline = Date.now() + pollMs;
-  while (Date.now() < deadline) {
-    // 1. Stop/completion button visible
-    if (selectors.completion.length > 0) {
-      const stopButton = queryFirstSelector(selectors.completion);
-      if (stopButton) return true;
-    }
-    // 2. Response container has started populating
-    const responseContainer = getResponseContainer(selectors.response);
-    if (hasResponseStarted(responseContainer)) return true;
-    // 3. Send button became disabled or disappeared
-    const sendButton = queryFirstSelector(selectors.send) as HTMLElement | null;
-    if (!sendButton || isDisabled(sendButton)) return true;
-    // 4. Input was cleared
-    const remainingText =
-      inputElement instanceof HTMLTextAreaElement || inputElement instanceof HTMLInputElement
-        ? inputElement.value
-        : (inputElement.innerText ?? inputElement.textContent ?? "");
-    if (!remainingText.trim()) return true;
-    await sleep(intervalMs);
-  }
-  return false;
+  if (checkProbeSubmissionSignals(selectors, inputElement)) return true;
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+
+    const finish = (result: boolean): void => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearInterval(intervalId);
+      clearTimeout(deadlineTimer);
+      resolve(result);
+    };
+
+    const check = (): void => {
+      if (checkProbeSubmissionSignals(selectors, inputElement)) {
+        finish(true);
+      }
+    };
+
+    const observer = new MutationObserver(() => check());
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
+    const intervalId = setInterval(check, intervalMs);
+    const deadlineTimer = setTimeout(() => finish(false), pollMs);
+  });
 }
 
 function submitViaEnterKey(inputElement: HTMLElement): void {

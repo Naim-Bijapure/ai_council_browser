@@ -9,8 +9,8 @@ import {
   type JudgeStep,
   type StoredCouncilSession
 } from "../types";
-import { openTabAndListenForReady, openAgentPopupAndListenForReady } from "./diagnostics";
-import { getActiveWindowId, findMatchingTabInWindow } from "./windowContext";
+import { openTabAndListenForReady } from "./diagnostics";
+import { getActiveWindowId } from "./windowContext";
 import type { BgToContentMessage, ContentToBgMessage } from "./messages";
 import { loadSelectorConfig } from "./selectorConfig";
 import {
@@ -20,38 +20,40 @@ import {
   type SendConfirmationResult
 } from "./types";
 
-// Get whether agent popups should be created focused based on session settings.
-// In silent mode, popups still open in foreground initially (focused=true)
-// to ensure reliable injection, then get minimized after submission.
-// In non-silent mode, popups stay in foreground throughout.
-function getAgentPopupFocused(_session: ActiveCouncilSession): boolean {
-  // Always open in foreground for reliable injection
-  return true;
-}
-
-// After injection succeeds, minimize the window in silent mode to get it out of the way.
-async function minimizeWindowAfterInjection(
-  windowId: number | null,
-  silentMode: boolean
-): Promise<void> {
-  if (!silentMode || windowId == null) return;
-  
-  try {
-    // Minimize the window to get it out of the user's way
-    await browser.windows.update(windowId, { state: "minimized" });
-  } catch {
-    // Window may have been closed
-  }
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Open a tab in the user's window and wait for it to load + content script
+ * ready. Falls back to the current window if windowId is null.
+ */
+async function openCouncilTab(
+  windowId: number | null,
+  url: string,
+  tabLoadTimeoutMs: number,
+  contentReadyTimeoutMs: number,
+  appKey: AppKey
+): Promise<{ tabId: number; tabUrl: string | null; loaded: boolean; contentReady: boolean }> {
+  if (windowId != null) {
+    return openTabAndListenForReadyInWindow(
+      windowId,
+      url,
+      tabLoadTimeoutMs,
+      contentReadyTimeoutMs,
+      appKey,
+      true
+    );
+  }
+  return openTabAndListenForReady(url, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, true);
 }
 
 export interface CouncilRunnerCallbacks {
   onUpdate: (session: ActiveCouncilSession) => void;
   onComplete: (session: ActiveCouncilSession) => void;
   isCancelled: () => boolean;
+  getSkipAgent: () => AppKey | null;
+  clearSkipAgent: () => void;
 }
 
 interface ActiveRunState {
@@ -60,13 +62,8 @@ interface ActiveRunState {
   timers: ReturnType<typeof setTimeout>[];
   tabListeners: Array<() => void>;
   messageListeners: Array<() => void>;
-  agentTabIds: Map<AppKey, number>;
-  // Parallel mode: one popup window per agent, all open at once. Tracked so
-  // they can be closed on completion/cancellation.
-  agentWindowIds: Map<AppKey, number>;
-  // Sequential mode: the single agent popup window currently open. Tracked so
-  // it can be closed on cancellation/cleanup.
-  currentAgentWindowId: number | null;
+  // The single council tab reused for all agents + judge.
+  councilTabId: number | null;
   judgeTabId: number | null;
   judgeWindowId: number | null;
 }
@@ -87,9 +84,7 @@ export async function runCouncil(
     timers: [],
     tabListeners: [],
     messageListeners: [],
-    agentTabIds: new Map(),
-    agentWindowIds: new Map(),
-    currentAgentWindowId: null,
+    councilTabId: null,
     judgeTabId: null,
     judgeWindowId: windowId
   };
@@ -120,6 +115,7 @@ export async function runCouncil(
 
   const checkCancelled = (): boolean => {
     if (callbacks.isCancelled() || state.cancelled) {
+      state.cancelled = true;
       cleanup(state);
       return true;
     }
@@ -131,190 +127,127 @@ export async function runCouncil(
   try {
     if (checkCancelled()) return;
 
-    if (session.parallelMode) {
-      // PARALLEL MODE: same popup flow as sequential, but every agent gets its
-      // OWN popup window and they all run at the same time. Popups are visible
-      // windows, so Chrome keeps rendering them even when they are not the
-      // focused window (unlike hidden background tabs, which get throttled and
-      // never finish mounting heavy SPA inputs/responses). Only one popup can
-      // hold keyboard focus, but submission is a button CLICK and completion
-      // is a MutationObserver — neither needs focus. Each popup is cascaded so
-      // they don't fully overlap, and closes as soon as its agent finishes.
-      await Promise.all(
-        agentKeys.map(async (key, index) => {
-          if (checkCancelled()) return;
+    // SINGLE-TAB SEQUENTIAL: One tab (councilTabId) is opened for the first
+    // agent and reused for all subsequent agents + judge. The tab is always
+    // foreground (active) so it gets full CPU — no background-tab throttling.
+    // Each agent: navigate to URL → wait ready → inject → get full response →
+    // navigate to next agent's URL. The tab stays open after the run so the
+    // user can see the judge's response.
+    for (let i = 0; i < agentKeys.length; i++) {
+      const key = agentKeys[i];
+      if (checkCancelled()) break;
 
-          updateAgent(key, { status: "injecting", startedAt: Date.now() });
+      updateAgent(key, { status: "injecting", startedAt: Date.now() });
 
-          const url = getSupportedApp(key).newChatUrl;
-          const popup = await openAgentPopupAndListenForReady(
-            url,
-            timeouts.tabLoadMs,
-            timeouts.contentReadyMs,
-            key,
-            getAgentPopupFocused(session),
-            { left: 60 + index * 48, top: 60 + index * 48 }
-          ).catch(() => null);
+      const url = getSupportedApp(key).newChatUrl;
 
-          if (popup?.windowId != null) {
-            state.agentWindowIds.set(key, popup.windowId);
-          }
-          const tabId = popup != null && popup.tabId >= 0 ? popup.tabId : null;
-          if (tabId != null) {
-            state.agentTabIds.set(key, tabId);
-          }
+      let loaded = false;
+      let contentReady = false;
+      let tabUrl: string | null = null;
 
-          if (checkCancelled()) return;
+      if (state.councilTabId == null) {
+        // First agent: open a new tab (active, foreground)
+        const ready = await openCouncilTab(
+          windowId,
+          url,
+          timeouts.tabLoadMs,
+          timeouts.contentReadyMs,
+          key
+        ).catch(() => null);
 
-          if (tabId == null || !popup?.loaded) {
-            updateAgent(key, { status: "error", errorReason: "tab_load_timeout", completedAt: Date.now() });
-            await closeAgentPopup(state, key);
-            return;
-          }
-          if (!popup.contentReady) {
-            updateAgent(key, { status: "error", errorReason: "content_script_timeout", completedAt: Date.now() });
-            await closeAgentPopup(state, key);
-            return;
-          }
-
-          if (!session.agentTabUrl && popup.tabUrl) {
-            session = update({ agentTabUrl: popup.tabUrl });
-          }
-
-          // Send the prompt and WAIT for the full response.
-          const adapterResult = await sendAgentRun(key, tabId, session.prompt, timeouts, state);
-          
-          // In silent mode, minimize the window after injection completes.
-          await minimizeWindowAfterInjection(popup?.windowId ?? null, session.silentMode === true);
-          
-          await closeAgentPopup(state, key);
-
-          if (checkCancelled()) return;
-
-          if (!adapterResult.success) {
-            updateAgent(key, {
-              status: "error",
-              errorReason: adapterResult.errorReason ?? "dom_error",
-              completedAt: Date.now()
-            });
-            return;
-          }
-
-          updateAgent(key, {
-            status: "done",
-            responseText: adapterResult.responseText ?? "",
-            completedAt: adapterResult.completedAt ?? Date.now()
-          });
-        })
-      );
-    } else {
-      // Run each agent SEQUENTIALLY inside ONE reused popup window: open the
-      // popup once for the first agent, then navigate that same window's tab to
-      // each subsequent agent's URL. Capture happens without closing the window
-      // between agents; the window is closed only after the last agent.
-      //
-      // Why one reused window (not one popup per agent)? Creating and closing a
-      // window per agent caused focus races — the next popup would open in the
-      // background and not raise. A single window is created focused once and
-      // re-raised before each injection. Submission uses a button CLICK (not the
-      // Enter key), so it does not depend on the window keeping OS focus, and
-      // completion is detected via MutationObserver, which is throttle-tolerant.
-      let popupWindowId: number | null = null;
-      let popupTabId: number | null = null;
-
-      for (const key of agentKeys) {
-        if (checkCancelled()) break;
-
-        updateAgent(key, { status: "injecting", startedAt: Date.now() });
-
-        const url = getSupportedApp(key).newChatUrl;
-        let loaded = false;
-        let contentReady = false;
-        let tabUrl: string | null = null;
-
-        if (popupTabId == null) {
-          // First agent: create the shared popup window.
-          const popup = await openAgentPopupAndListenForReady(
-            url,
-            timeouts.tabLoadMs,
-            timeouts.contentReadyMs,
-            key,
-            getAgentPopupFocused(session)
-          ).catch(() => null);
-          if (popup?.windowId != null) {
-            popupWindowId = popup.windowId;
-            state.currentAgentWindowId = popup.windowId;
-          }
-          if (popup?.tabId != null && popup.tabId >= 0) {
-            popupTabId = popup.tabId;
-          }
-          loaded = popup?.loaded ?? false;
-          contentReady = popup?.contentReady ?? false;
-          tabUrl = popup?.tabUrl ?? null;
-        } else {
-          // Subsequent agents: reuse the window, navigate its tab to the new URL.
-          try {
-            await browser.tabs.update(popupTabId, { url, active: true });
-          } catch {
-            // tab may have been closed — will fail readiness below
-          }
-          const ready = await openTabAndListenForReadyOnExistingTab(
-            popupTabId,
-            url,
-            timeouts.tabLoadMs,
-            timeouts.contentReadyMs,
-            key
-          ).catch(() => null);
-          loaded = ready?.loaded ?? false;
-          contentReady = ready?.contentReady ?? false;
-          tabUrl = ready?.tabUrl ?? null;
+        if (ready && ready.tabId >= 0) {
+          state.councilTabId = ready.tabId;
+          loaded = ready.loaded;
+          contentReady = ready.contentReady;
+          tabUrl = ready.tabUrl;
         }
-
-        if (checkCancelled()) break;
-
-        // Readiness gating.
-        if (popupTabId == null || !loaded) {
-          updateAgent(key, { status: "error", errorReason: "tab_load_timeout", completedAt: Date.now() });
-          continue;
+      } else {
+        // Subsequent agents: navigate the same council tab to the new URL
+        try {
+          await browser.tabs.update(state.councilTabId, { url });
+        } catch {
+          // tab may have been closed — will fail readiness below
         }
-        if (!contentReady) {
-          updateAgent(key, { status: "error", errorReason: "content_script_timeout", completedAt: Date.now() });
-          continue;
-        }
-
-        state.agentTabIds.set(key, popupTabId);
-        if (!session.agentTabUrl && tabUrl) {
-          session = update({ agentTabUrl: tabUrl });
-        }
-
-        // Send the prompt and WAIT for the full response.
-        const adapterResult = await sendAgentRun(key, popupTabId, session.prompt, timeouts, state);
-        
-        // In silent mode, minimize the window after injection completes.
-        await minimizeWindowAfterInjection(popupWindowId, session.silentMode === true);
-        
-        state.agentTabIds.delete(key);
-
-        if (checkCancelled()) break;
-
-        if (!adapterResult.success) {
-          updateAgent(key, {
-            status: "error",
-            errorReason: adapterResult.errorReason ?? "dom_error",
-            completedAt: Date.now()
-          });
-          continue;
-        }
-
-        updateAgent(key, {
-          status: "done",
-          responseText: adapterResult.responseText ?? "",
-          completedAt: adapterResult.completedAt ?? Date.now()
-        });
+        const ready = await openTabAndListenForReadyOnExistingTab(
+          state.councilTabId,
+          url,
+          timeouts.tabLoadMs,
+          timeouts.contentReadyMs,
+          key,
+          true
+        ).catch(() => null);
+        loaded = ready?.loaded ?? false;
+        contentReady = ready?.contentReady ?? false;
+        tabUrl = ready?.tabUrl ?? null;
       }
 
-      // All agents processed — close the shared popup window.
-      await closeAgentWindow(state, popupWindowId);
+      if (checkCancelled()) break;
+
+      // Readiness gating
+      if (state.councilTabId == null || !loaded) {
+        updateAgent(key, { status: "error", errorReason: "tab_load_timeout", completedAt: Date.now() });
+        continue;
+      }
+      if (!contentReady) {
+        updateAgent(key, { status: "error", errorReason: "content_script_timeout", completedAt: Date.now() });
+        continue;
+      }
+
+      if (!session.agentTabUrl && tabUrl) {
+        session = update({ agentTabUrl: tabUrl });
+      }
+
+      // Start URL capture BEFORE sending the prompt so SPA URL changes
+      // (new-chat → conversation) are not missed.
+      const agentUrlCapture = state.councilTabId != null
+        ? startUrlCapture(state.councilTabId, url, timeouts.urlCaptureMs, state)
+        : null;
+
+      // Send the prompt and WAIT for the full response, racing against a
+      // skip signal so the user can abort a stuck/slow agent.
+      const adapterResult = await sendAgentRunWithSkip(
+        key,
+        state.councilTabId,
+        session.prompt,
+        timeouts,
+        state,
+        callbacks
+      );
+
+      // Resolve URL capture (may have already resolved via listener)
+      const agentChatUrl = agentUrlCapture ? await agentUrlCapture.promise : null;
+      if (checkCancelled()) {
+        agentUrlCapture?.cancel();
+        break;
+      }
+
+      if (adapterResult.skipped) {
+        agentUrlCapture?.cancel();
+        updateAgent(key, {
+          status: "skipped",
+          errorReason: "skipped",
+          completedAt: Date.now(),
+          chatUrl: agentChatUrl ?? undefined
+        });
+        continue;
+      }
+
+      if (!adapterResult.success) {
+        updateAgent(key, {
+          status: "error",
+          errorReason: adapterResult.errorReason ?? "dom_error",
+          completedAt: Date.now(),
+          chatUrl: agentChatUrl ?? undefined
+        });
+        continue;
+      }
+
+      updateAgent(key, {
+        status: "done",
+        responseText: adapterResult.responseText ?? "",
+        completedAt: adapterResult.completedAt ?? Date.now(),
+        chatUrl: agentChatUrl ?? undefined
+      });
     }
 
     if (checkCancelled()) return;
@@ -361,39 +294,80 @@ export async function runCouncil(
 
     session = update({ judgePrompt: judgePrompt.text });
 
-    // Step 6: Open judge tab in active window, reusing current tab if it matches judge app
+    // Step 6: Navigate the council tab to the judge URL (reuse same tab)
     const judgeKey = session.judgeApp;
-    const judgeResult = await openJudgeTabAndListenForReady(
-      judgeKey,
-      state.judgeWindowId,
-      timeouts.tabLoadMs,
-      timeouts.contentReadyMs
-    ).catch(() => null);
+    const judgeNewChatUrl = getSupportedApp(judgeKey).newChatUrl;
 
-    if (checkCancelled()) return;
+    if (state.councilTabId == null) {
+      // Council tab was closed — open a new one
+      const ready = await openCouncilTab(
+        windowId,
+        judgeNewChatUrl,
+        timeouts.tabLoadMs,
+        timeouts.contentReadyMs,
+        judgeKey
+      ).catch(() => null);
+      state.councilTabId = ready && ready.tabId >= 0 ? ready.tabId : null;
+      state.judgeTabId = state.councilTabId;
 
-    state.judgeTabId = judgeResult?.tabId ?? null;
+      if (!ready?.loaded) {
+        updateJudge({
+          status: "error",
+          errorReason: "tab_load_timeout",
+          startedAt: Date.now(),
+          completedAt: Date.now()
+        });
+        await finalizeSession(session, callbacks, state);
+        return;
+      }
+      if (!ready.contentReady) {
+        updateJudge({
+          status: "error",
+          errorReason: "content_script_timeout",
+          startedAt: Date.now(),
+          completedAt: Date.now()
+        });
+        await finalizeSession(session, callbacks, state);
+        return;
+      }
+    } else {
+      // Navigate the existing council tab to the judge URL
+      try {
+        await browser.tabs.update(state.councilTabId, { url: judgeNewChatUrl });
+      } catch {
+        // tab may have been closed
+      }
+      const ready = await openTabAndListenForReadyOnExistingTab(
+        state.councilTabId,
+        judgeNewChatUrl,
+        timeouts.tabLoadMs,
+        timeouts.contentReadyMs,
+        judgeKey,
+        true
+      ).catch(() => null);
 
-    if (!judgeResult?.loaded) {
-      updateJudge({
-        status: "error",
-        errorReason: "tab_load_timeout",
-        startedAt: Date.now(),
-        completedAt: Date.now()
-      });
-      await finalizeSession(session, callbacks, state);
-      return;
-    }
+      state.judgeTabId = state.councilTabId;
 
-    if (!judgeResult?.contentReady) {
-      updateJudge({
-        status: "error",
-        errorReason: "content_script_timeout",
-        startedAt: Date.now(),
-        completedAt: Date.now()
-      });
-      await finalizeSession(session, callbacks, state);
-      return;
+      if (!ready?.loaded) {
+        updateJudge({
+          status: "error",
+          errorReason: "tab_load_timeout",
+          startedAt: Date.now(),
+          completedAt: Date.now()
+        });
+        await finalizeSession(session, callbacks, state);
+        return;
+      }
+      if (!ready?.contentReady) {
+        updateJudge({
+          status: "error",
+          errorReason: "content_script_timeout",
+          startedAt: Date.now(),
+          completedAt: Date.now()
+        });
+        await finalizeSession(session, callbacks, state);
+        return;
+      }
     }
 
     if (checkCancelled()) return;
@@ -402,9 +376,8 @@ export async function runCouncil(
 
     // Start URL capture listener BEFORE sending the judge prompt so SPA URL
     // changes are not missed.
-    const judgeNewChatUrl = getSupportedApp(judgeKey).newChatUrl;
     const urlCaptureHandle = state.judgeTabId != null
-      ? startJudgeUrlCapture(state.judgeTabId, judgeNewChatUrl, timeouts.urlCaptureMs, state)
+      ? startUrlCapture(state.judgeTabId, judgeNewChatUrl, timeouts.urlCaptureMs, state)
       : null;
 
     const judgeSendResult = state.judgeTabId != null
@@ -492,6 +465,48 @@ async function sendAgentRun(
   });
 }
 
+interface SkipAdapterResult extends AdapterResult {
+  skipped?: boolean;
+}
+
+/**
+ * Wraps sendAgentRun with a skip-signal poller. If the user clicks "Skip"
+ * on the currently-running agent, this resolves early with `skipped: true`
+ * instead of waiting for the agent's ADAPTER_RESULT.
+ */
+async function sendAgentRunWithSkip(
+  appKey: AppKey,
+  tabId: number,
+  prompt: string,
+  timeouts: AutomationTimeouts,
+  state: ActiveRunState,
+  callbacks: CouncilRunnerCallbacks
+): Promise<SkipAdapterResult> {
+  const skipPromise = new Promise<SkipAdapterResult>((resolve) => {
+    const poll = (): void => {
+      if (callbacks.isCancelled()) {
+        resolve({ success: false, errorReason: "cancelled", skipped: true, completedAt: Date.now() });
+        return;
+      }
+      const skipKey = callbacks.getSkipAgent();
+      if (skipKey === appKey) {
+        callbacks.clearSkipAgent();
+        resolve({ success: false, errorReason: "skipped", skipped: true, completedAt: Date.now() });
+        return;
+      }
+      setTimeout(poll, 500);
+    };
+    setTimeout(poll, 500);
+  });
+
+  const result = await Promise.race([
+    sendAgentRun(appKey, tabId, prompt, timeouts, state),
+    skipPromise
+  ]);
+
+  return result as SkipAdapterResult;
+}
+
 async function sendJudgeRun(
   appKey: AppKey,
   tabId: number,
@@ -538,76 +553,25 @@ async function sendJudgeRun(
   });
 }
 
-async function captureJudgeUrl(
-  tabId: number,
-  newChatUrl: string,
-  timeoutMs: number,
-  state: ActiveRunState
-): Promise<string | null> {
-  return new Promise<string | null>((resolve) => {
-    let settled = false;
-
-    const finish = (url: string | null): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      browser.tabs.onUpdated.removeListener(listener);
-      state.tabListeners = state.tabListeners.filter((fn) => fn !== removeListener);
-      resolve(url);
-    };
-
-    const removeListener = (): void => {
-      browser.tabs.onUpdated.removeListener(listener);
-    };
-
-    const timer = setTimeout(() => {
-      void browser.tabs.get(tabId).then((tab) => {
-        const currentUrl = tab.url ?? "";
-        if (currentUrl && currentUrl !== newChatUrl && !isNewChatUrl(currentUrl, newChatUrl)) {
-          finish(currentUrl);
-        } else {
-          finish(null);
-        }
-      }).catch(() => finish(null));
-    }, timeoutMs);
-
-    const listener = (
-      updatedTabId: number,
-      changeInfo: Browser.tabs.OnUpdatedInfo,
-      updatedTab: Browser.tabs.Tab
-    ) => {
-      if (updatedTabId === tabId && changeInfo.url) {
-        const url = changeInfo.url;
-        if (!isNewChatUrl(url, newChatUrl)) {
-          finish(url);
-        }
-      }
-    };
-
-    state.tabListeners.push(removeListener);
-    browser.tabs.onUpdated.addListener(listener);
-  });
-}
-
-interface JudgeUrlCaptureHandle {
+interface UrlCaptureHandle {
   promise: Promise<string | null>;
   cancel: () => void;
 }
 
 /**
- * Attaches the tabs.onUpdated listener for judge URL capture BEFORE the judge
- * prompt is sent, so SPA URL changes are not missed. Also reads the current
- * tab URL at attach time for race-safety (the URL may have already changed).
+ * Attaches a tabs.onUpdated listener to capture when the tab navigates away
+ * from the new-chat URL to a conversation URL. Used for both agent and judge
+ * URL capture. Reads the current tab URL at attach time for race-safety.
  *
  * Returns a handle whose `promise` resolves with the captured URL or null,
  * and a `cancel` function to clean up the listener early.
  */
-function startJudgeUrlCapture(
+function startUrlCapture(
   tabId: number,
   newChatUrl: string,
   timeoutMs: number,
   state: ActiveRunState
-): JudgeUrlCaptureHandle {
+): UrlCaptureHandle {
   let settled = false;
   let resolveFn: (url: string | null) => void;
 
@@ -670,31 +634,6 @@ function startJudgeUrlCapture(
   };
 
   return { promise, cancel };
-}
-
-async function openJudgeTabAndListenForReady(
-  appKey: AppKey,
-  targetWindowId: number | null,
-  tabLoadTimeoutMs: number,
-  contentReadyTimeoutMs: number
-): Promise<{ tabId: number; tabUrl: string | null; loaded: boolean; contentReady: boolean }> {
-  const newChatUrl = getSupportedApp(appKey).newChatUrl;
-
-  // Use the window captured at the start of the council run, before agents opened.
-  if (targetWindowId != null) {
-    const { tabId: matchingTabId, matches } = await findMatchingTabInWindow(targetWindowId, appKey);
-    if (matches && matchingTabId != null) {
-      // Reuse the existing matching tab and focus it so user sees the judge
-      await browser.tabs.update(matchingTabId, { url: newChatUrl, active: true });
-      return openTabAndListenForReadyOnExistingTab(matchingTabId, newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, true);
-    }
-
-    // No matching tab; create a new tab in the captured window and focus it
-    return openTabAndListenForReadyInWindow(targetWindowId, newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, true);
-  }
-
-  // Fallback: open in a new window (previous behavior)
-  return openTabAndListenForReady(newChatUrl, tabLoadTimeoutMs, contentReadyTimeoutMs, appKey, true);
 }
 
 function openTabAndListenForReadyOnExistingTab(
@@ -989,37 +928,10 @@ async function finalizeSession(
 }
 
 /**
- * Closes a parallel-mode agent's popup window (if tracked) and clears it from
- * the run state. Safe to call for an already-closed window.
+ * Cleans up listeners and closes the council tab on cancellation.
+ * On normal completion the council tab is left open so the user can see
+ * the judge's response.
  */
-async function closeAgentPopup(state: ActiveRunState, key: AppKey): Promise<void> {
-  state.agentTabIds.delete(key);
-  const windowId = state.agentWindowIds.get(key);
-  if (windowId == null) return;
-  state.agentWindowIds.delete(key);
-  try {
-    await browser.windows.remove(windowId);
-  } catch {
-    // Window may already be closed — ignore.
-  }
-}
-
-/**
- * Closes an agent popup window (if any) and clears it from the run state.
- * Safe to call with a null windowId or an already-closed window.
- */
-async function closeAgentWindow(state: ActiveRunState, windowId: number | null): Promise<void> {
-  if (windowId == null) return;
-  try {
-    await browser.windows.remove(windowId);
-  } catch {
-    // Window may already be closed or gone — ignore.
-  }
-  if (state.currentAgentWindowId === windowId) {
-    state.currentAgentWindowId = null;
-  }
-}
-
 function cleanup(state: ActiveRunState): void {
   state.timers.forEach((t) => clearTimeout(t));
   state.timers = [];
@@ -1027,22 +939,12 @@ function cleanup(state: ActiveRunState): void {
   state.tabListeners = [];
   state.messageListeners.forEach((fn) => fn());
   state.messageListeners = [];
-  // Close any parallel-mode agent popups still open (e.g. on cancellation).
-  if (state.agentWindowIds.size > 0) {
-    const windowIds = [...state.agentWindowIds.values()];
-    state.agentWindowIds.clear();
-    state.agentTabIds.clear();
-    for (const windowId of windowIds) {
-      void browser.windows.remove(windowId).catch(() => {
-        // already closed — ignore
-      });
-    }
-  }
-  // Close any sequential-mode agent popup still open (e.g. on cancellation).
-  if (state.currentAgentWindowId != null) {
-    const windowId = state.currentAgentWindowId;
-    state.currentAgentWindowId = null;
-    void browser.windows.remove(windowId).catch(() => {
+  // Only close the council tab on cancellation — on normal completion the
+  // tab stays open so the user can see the judge's response.
+  if (state.cancelled && state.councilTabId != null) {
+    const tabId = state.councilTabId;
+    state.councilTabId = null;
+    void browser.tabs.remove(tabId).catch(() => {
       // already closed — ignore
     });
   }

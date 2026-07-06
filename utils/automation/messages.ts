@@ -33,6 +33,10 @@ export type ContentToBgMessage =
       appKey: AppKey;
     }
   | {
+      type: "SUBMITTED";
+      appKey: AppKey;
+    }
+  | {
       type: "ADAPTER_RESULT";
       appKey: AppKey;
       result: AdapterResult;
