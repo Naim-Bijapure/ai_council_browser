@@ -31,9 +31,14 @@ export function formatAppName(appKey: AppKey): string {
   return getSupportedApp(appKey).displayName;
 }
 
+export function formatErrorReason(errorReason?: string): string {
+  if (!errorReason) return "Unknown error";
+  return ERROR_LABELS[errorReason] ?? errorReason;
+}
+
 export function formatAgentStatus(status: AgentStatus, errorReason?: AgentErrorReason | string): string {
   if (status === "error" && errorReason) {
-    return ERROR_LABELS[errorReason] ?? "Error";
+    return formatErrorReason(errorReason);
   }
 
   return STATUS_LABELS[status];

@@ -4,10 +4,12 @@ import {
   formatAgentStatus,
   formatAppName,
   formatCharacterCount,
+  formatErrorReason,
   formatSessionStatus,
   formatTimestamp,
   truncateText
 } from "../../utils/format";
+import { isActiveCouncilRun } from "../../utils/sessionState";
 import {
   DEFAULT_AGENT_KEYS,
   DEFAULT_JUDGE_KEY,
@@ -121,7 +123,7 @@ export default function App() {
   const [expandedAgent, setExpandedAgent] = useState<AppKey | null>(null);
 
   const activeSession = snapshot.state === "active" ? snapshot.session : null;
-  const isRunning = activeSession?.status === "running" || activeSession?.status === "judge_handoff";
+  const isRunning = activeSession ? isActiveCouncilRun(activeSession) : false;
   const promptTooLong = prompt.length > MAX_USER_PROMPT_LENGTH;
   const canRun = prompt.trim().length > 0 && !promptTooLong && !isRunning && !loading && selectedAgents.length > 0;
 
@@ -342,12 +344,19 @@ export default function App() {
               : `Relay: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} judge`}
           </p>
         </div>
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)}>
-          <TabsList aria-label="AI Council sections">
-            <TabsTrigger value="council">Council</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-2">
+          {activeSession && !isRunning ? (
+            <Button variant="outline" size="sm" onClick={() => void newQuestion()} type="button">
+              New question
+            </Button>
+          ) : null}
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)}>
+            <TabsList aria-label="AI Council sections">
+              <TabsTrigger value="council">Council</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </header>
 
       {activeTab === "council" ? (
@@ -743,9 +752,26 @@ function SessionView({
         </div>
       ) : null}
 
-      {session.status === "partial_failure" ? (
+      {judgeStep.status === "error" || judgeStep.status === "timeout" ? (
         <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
-          <span className="font-bold text-foreground">Judge step failed — no judge prompt was sent (agents may have succeeded).</span>
+          <span className="font-bold text-foreground">
+            Judge step failed
+            {judgeStep.errorReason ? `: ${formatErrorReason(judgeStep.errorReason)}` : ""}
+          </span>
+          <p className="text-xs text-muted-foreground">
+            Agent results were saved. Start a new question to run the council again.
+          </p>
+          <Button onClick={() => void onNewQuestion()} type="button">
+            New question
+          </Button>
+        </div>
+      ) : null}
+
+      {session.status === "partial_failure" && judgeStep.status !== "error" && judgeStep.status !== "timeout" ? (
+        <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
+          <span className="font-bold text-foreground">
+            {session.errorMessage ?? "Judge step failed — no judge prompt was sent (agents may have succeeded)."}
+          </span>
           <Button onClick={() => void onNewQuestion()} type="button">
             New question
           </Button>
@@ -754,7 +780,7 @@ function SessionView({
 
       {session.status === "error" ? (
         <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
-          <span className="font-bold text-foreground">Session error: {session.errorMessage ?? "judge step failed"}</span>
+          <span className="font-bold text-foreground">Session error: {session.errorMessage ?? "Council run failed"}</span>
           <Button onClick={() => void onNewQuestion()} type="button">
             New question
           </Button>
@@ -765,7 +791,11 @@ function SessionView({
         <Button variant="destructive" onClick={() => void onCancel()} type="button" className="mt-2">
           Cancel
         </Button>
-      ) : null}
+      ) : (
+        <Button onClick={() => void onNewQuestion()} type="button" className="mt-2">
+          New question
+        </Button>
+      )}
     </div>
   );
 }

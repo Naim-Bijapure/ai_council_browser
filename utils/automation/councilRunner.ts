@@ -913,10 +913,17 @@ async function finalizeSession(
   const judgeSent = session.judgeStep.status === "sent";
 
   let status: ActiveCouncilSession["status"];
+  let errorMessage = session.errorMessage;
+
   if (judgeSent) {
     status = session.judgeChatUrl ? "done" : "partial";
   } else if (anyAgentDone) {
     status = "partial_failure";
+    if (!errorMessage && session.judgeStep.status === "error") {
+      errorMessage = session.judgeStep.errorReason
+        ? `Judge step failed: ${session.judgeStep.errorReason}`
+        : "Judge step failed";
+    }
   } else {
     status = "error";
   }
@@ -924,7 +931,8 @@ async function finalizeSession(
   const finalSession: ActiveCouncilSession = {
     ...session,
     status,
-    durationMs
+    durationMs,
+    ...(errorMessage ? { errorMessage } : {})
   };
 
   await saveSession(toStoredSession(finalSession));
