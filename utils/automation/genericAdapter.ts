@@ -33,7 +33,7 @@ const STOP_BUTTON_POLL_INTERVAL_MS = 500;
 const INPUT_READY_WAIT_MS = 30_000;
 const DOM_STABILIZATION_QUIET_MS = 6_000;
 const MIN_RESPONSE_LENGTH = 10;
-const SEND_CONFIRMATION_TIMEOUT_MS = 15_000;
+const SEND_CONFIRMATION_TIMEOUT_MS = 30_000;
 const SEND_CONFIRMATION_POLL_MS = 300;
 // Grace period before falling back to text stabilization when no stop button has been seen.
 // Prevents "Searching the web" / "Thinking..." transient text from triggering premature completion
@@ -352,7 +352,7 @@ async function runJudgeInner(
   }
 
   await sleep(100);
-  log(appKey, "Text injected");
+  log(appKey, "Text injected", { length: prompt.length });
 
   // Step 4: Wait for send button
   log(appKey, "Waiting for send button to enable...");
@@ -391,7 +391,7 @@ async function runJudgeInner(
 
   // Step 6: Confirm message sent
   log(appKey, "Confirming message sent...");
-  const confirmed = await confirmMessageSent(appKey, selectors, urlBeforeSend, hadResponseContainer);
+  const confirmed = await confirmMessageSent(appKey, selectors, urlBeforeSend, hadResponseContainer, inputElement);
   log(appKey, "Send confirmation result", confirmed);
   return confirmed;
 }
@@ -554,11 +554,25 @@ async function confirmMessageSent(
   appKey: AppKey,
   selectors: SelectorGroup,
   urlBeforeSend: string,
-  hadResponseContainer: boolean
+  hadResponseContainer: boolean,
+  inputElement?: HTMLElement
 ): Promise<SendConfirmationResult> {
   const deadline = Date.now() + SEND_CONFIRMATION_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
+    // Early exit on any standard submit-accepted signal (input cleared, stop button,
+    // send disabled, or response text started). This is critical for large/complex
+    // judge prompts where the model may take >15s before producing visible answer
+    // text or performing a client-side URL change. We still accept the legacy signals.
+    try {
+      if (inputElement && checkSubmissionSignals(selectors, inputElement)) {
+        log(appKey, "  Confirmed: submission signal (stop/send/input/cleared/response)");
+        return { sent: true };
+      }
+    } catch {
+      // Non-fatal; fall through to other signals.
+    }
+
     if (window.location.href !== urlBeforeSend) {
       log(appKey, "  Confirmed: URL changed");
       return { sent: true };

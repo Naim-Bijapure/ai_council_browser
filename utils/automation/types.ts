@@ -75,7 +75,8 @@ export const LOGIN_URL_PATTERNS: Record<AppKey, string[]> = {
   deepseek: ["/sign_in", "/sign_up"],
   qwen: ["/login"],
   kimi: ["/login"],
-  perplexity: ["/login", "/signin"]
+  perplexity: ["/login", "/signin"],
+  grok: ["/login", "x.com/login", "accounts.x.com"]
 };
 
 export type ProbeMode = "static" | "live";

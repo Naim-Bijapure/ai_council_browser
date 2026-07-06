@@ -5,6 +5,7 @@ import geminiSelectors from "../../config/selectors/gemini.json" with { type: "j
 import qwenSelectors from "../../config/selectors/qwen.json" with { type: "json" };
 import kimiSelectors from "../../config/selectors/kimi.json" with { type: "json" };
 import perplexitySelectors from "../../config/selectors/perplexity.json" with { type: "json" };
+import grokSelectors from "../../config/selectors/grok.json" with { type: "json" };
 import type { SelectorConfig, SelectorGroup } from "./types";
 import type { AppKey } from "../types";
 
@@ -15,7 +16,8 @@ const SELECTOR_CONFIGS: Partial<Record<AppKey, SelectorConfig>> = {
   gemini: geminiSelectors as SelectorConfig,
   qwen: qwenSelectors as SelectorConfig,
   kimi: kimiSelectors as SelectorConfig,
-  perplexity: perplexitySelectors as SelectorConfig
+  perplexity: perplexitySelectors as SelectorConfig,
+  grok: grokSelectors as SelectorConfig
 };
 
 const REQUIRED_GROUPS: (keyof SelectorGroup)[] = ["input", "send", "response"];

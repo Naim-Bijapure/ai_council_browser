@@ -69,6 +69,16 @@
       "automationRoles": ["agent", "judge"],
       "loginUrlPatterns": ["/login", "/signin"],
       "enabled": true
+    },
+    {
+      "key": "grok",
+      "displayName": "Grok",
+      "domain": "grok.com",
+      "matchPatterns": ["https://grok.com/*", "https://grok.x.ai/*"],
+      "newChatUrl": "https://grok.com/",
+      "automationRoles": ["agent", "judge"],
+      "loginUrlPatterns": ["/login", "x.com/login", "accounts.x.com"],
+      "enabled": true
     }
   ]
 }

@@ -1,0 +1,32 @@
+{
+  "appKey": "grok",
+  "_comment": "Verified 2026-07-06 from grok.com DOM inspection (AI Council DOM Inspector v3). Input: tiptap ProseMirror div with aria-label='Ask Grok anything' (role=textarea contenteditable). Send: button[data-testid='chat-submit'] + aria-label='Submit' (appears when text present). Response: div[data-testid='assistant-message'] (contains the clean markdown answer). Completion/stop during generation: not strongly aria-labeled in provided dumps (often icon button); relies on disappearance + text stabilization fallback. Input cleared after submit. No obvious blocked/login elements in inspected states.",
+  "selectors": {
+    "input": [
+      "div[aria-label='Ask Grok anything']",
+      "div.tiptap.ProseMirror[contenteditable='true']",
+      "div[contenteditable='true'][role='textbox']",
+      "div[contenteditable='true']"
+    ],
+    "send": [
+      "button[data-testid='chat-submit']",
+      "button[aria-label='Submit']",
+      "button[type='submit']"
+    ],
+    "response": [
+      "div[data-testid='assistant-message']",
+      "div.message-bubble[data-testid='assistant-message']",
+      "div.relative.response-content-markdown"
+    ],
+    "completion": [
+      "button[aria-label*='Stop']",
+      "button[aria-label*='stop']"
+    ],
+    "blocked": [],
+    "loginError": [
+      "a[href*='login']",
+      "a[href*='x.com']",
+      "a[href*='accounts.x.com']"
+    ]
+  }
+}

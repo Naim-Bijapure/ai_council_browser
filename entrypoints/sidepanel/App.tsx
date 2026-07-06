@@ -86,7 +86,9 @@ const APP_LABELS: Record<string, string> = {
   gemini: "Gemini",
   deepseek: "DeepSeek",
   qwen: "Qwen",
-  kimi: "Kimi"
+  kimi: "Kimi",
+  perplexity: "Perplexity",
+  grok: "Grok"
 };
 
 // Status → badge variant mapping used across agent/judge/diagnostic cards.
@@ -753,7 +755,7 @@ function SessionView({
 
       {session.status === "partial_failure" ? (
         <div className="grid gap-3 rounded-lg border border-destructive/35 bg-destructive/10 p-4">
-          <span className="font-bold text-foreground">All agents failed — no judge prompt sent.</span>
+          <span className="font-bold text-foreground">Judge step failed — no judge prompt was sent (agents may have succeeded).</span>
           <Button onClick={() => void onNewQuestion()} type="button">
             New question
           </Button>

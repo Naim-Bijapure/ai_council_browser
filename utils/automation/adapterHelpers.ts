@@ -73,6 +73,10 @@ function insertViaPaste(element: HTMLElement, text: string): void {
 }
 
 export async function setInputText(element: HTMLElement, text: string): Promise<void> {
+  // Normalize line endings so \r\n and \r become \n. This ensures consistent
+  // handling of multi-line prompts coming from the side panel textarea.
+  text = text.replace(/\r\n?/g, '\n');
+
   if (isContentEditable(element)) {
     const normalize = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, "");
     const current = () => normalize(element.textContent ?? "");
@@ -93,33 +97,39 @@ export async function setInputText(element: HTMLElement, text: string): Promise<
     // Fire insertion methods ONE AT A TIME, awaiting after each so that editors
     // which process input asynchronously (Lexical — Perplexity) have time to
     // update the DOM before we decide whether to try the next method. Stop at
-    // the first method that lands the text.
+    // the first method that lands the *full* text (we check normalized
+    // non-whitespace length to support multi-line prompts).
     //
     // This ordering matters: firing several methods synchronously queues
     // multiple async insertions that Lexical all applies a moment later,
     // duplicating the prompt ("Say helloSay hello...").
     const tryMethod = async (fn: () => void): Promise<boolean> => {
-      if (current().length > 0) return true;
+      if (current().length >= expected.length) return true;
       fn();
       // Poll briefly for async editors to render the insertion.
       for (let i = 0; i < 6; i++) {
         await sleep(40);
-        if (current().length > 0) break;
+        if (current().length >= expected.length) break;
       }
-      return current().length > 0;
+      return current().length >= expected.length;
     };
 
-    // Method 1: execCommand insertText — reliable for ProseMirror/Quill and
-    // works (asynchronously) for Lexical.
-    let inserted = await tryMethod(() => {
-      if (typeof document.execCommand === "function") {
-        document.execCommand("insertText", false, text);
-      }
-    });
+    // Method 1: simulated paste — best for preserving newlines and structure
+    // across editors (Quill/Gemini, Lexical, etc.). execCommand("insertText")
+    // with \n often only inserts the first line (or collapses newlines) in
+    // some rich editors like Gemini's ql-editor. We now prefer paste and use
+    // a stricter "full content received" check (normalized non-whitespace length)
+    // so partial insertions don't short-circuit the better methods.
+    let inserted = await tryMethod(() => insertViaPaste(element, text));
 
-    // Method 2: simulated paste — Lexical's canonical single-insert path.
+    // Method 2: execCommand insertText — fallback, good for many ProseMirror
+    // and Quill cases without newlines.
     if (!inserted) {
-      inserted = await tryMethod(() => insertViaPaste(element, text));
+      inserted = await tryMethod(() => {
+        if (typeof document.execCommand === "function") {
+          document.execCommand("insertText", false, text);
+        }
+      });
     }
 
     // Method 3: synthetic beforeinput.
@@ -138,7 +148,17 @@ export async function setInputText(element: HTMLElement, text: string): Promise<
 
     // Method 4 (last resort): set textContent directly.
     if (!inserted) {
-      element.textContent = text;
+      // For multi-line prompts, try to preserve line breaks. Many
+      // contenteditables treat \n in textContent as collapsed whitespace.
+      if (text.includes('\n')) {
+        element.innerHTML = text
+          .split('\n')
+          .map((line) => (line.length ? line : '<br>'))
+          .map((l) => `<div>${l}</div>`)
+          .join('');
+      } else {
+        element.textContent = text;
+      }
     }
 
     // Notify frameworks that the value changed. Editors like Lexical
@@ -164,7 +184,15 @@ export async function setInputText(element: HTMLElement, text: string): Promise<
     await sleep(50);
     if (current() !== expected && current().length > expected.length) {
       clearContentEditable(element);
-      element.textContent = text;
+      if (text.includes('\n')) {
+        element.innerHTML = text
+          .split('\n')
+          .map((line) => (line.length ? line : '<br>'))
+          .map((l) => `<div>${l}</div>`)
+          .join('');
+      } else {
+        element.textContent = text;
+      }
       element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
     }
 

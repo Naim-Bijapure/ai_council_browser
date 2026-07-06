@@ -301,6 +301,13 @@ export async function runCouncil(
 
     session = update({ judgePrompt: judgePrompt.text });
 
+    // Start the judge phase visibly as soon as agents are done.
+    // The tab navigation + content ready wait is part of "injecting the judge prompt"
+    // (we must have the correct page and content script ready before we can type).
+    // This prevents the judge from appearing stuck on "Waiting..." during what
+    // can be a slow cross-origin tab navigation + SPA load for the judge app.
+    updateJudge({ status: "injecting", startedAt: Date.now() });
+
     // Step 6: Navigate the council tab to the judge URL (reuse same tab)
     const judgeKey = session.judgeApp;
     const judgeNewChatUrl = getSupportedApp(judgeKey).newChatUrl;
@@ -321,7 +328,6 @@ export async function runCouncil(
         updateJudge({
           status: "error",
           errorReason: "tab_load_timeout",
-          startedAt: Date.now(),
           completedAt: Date.now()
         });
         await finalizeSession(session, callbacks, state);
@@ -331,7 +337,6 @@ export async function runCouncil(
         updateJudge({
           status: "error",
           errorReason: "content_script_timeout",
-          startedAt: Date.now(),
           completedAt: Date.now()
         });
         await finalizeSession(session, callbacks, state);
@@ -359,7 +364,6 @@ export async function runCouncil(
         updateJudge({
           status: "error",
           errorReason: "tab_load_timeout",
-          startedAt: Date.now(),
           completedAt: Date.now()
         });
         await finalizeSession(session, callbacks, state);
@@ -369,7 +373,6 @@ export async function runCouncil(
         updateJudge({
           status: "error",
           errorReason: "content_script_timeout",
-          startedAt: Date.now(),
           completedAt: Date.now()
         });
         await finalizeSession(session, callbacks, state);
@@ -379,8 +382,8 @@ export async function runCouncil(
 
     if (checkCancelled()) return;
 
-    updateJudge({ status: "injecting", startedAt: Date.now() });
-
+    // Judge phase already marked "injecting" above (includes tab prep).
+    // We now perform the actual prompt injection + send confirmation.
     const judgeSendResult = state.judgeTabId != null
       ? await sendJudgeRun(judgeKey, state.judgeTabId, judgePrompt.text, timeouts, state)
       : { sent: false, errorReason: "tab_load_timeout" as const };

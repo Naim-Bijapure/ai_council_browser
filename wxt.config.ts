@@ -28,7 +28,9 @@ export default defineConfig({
       "https://kimi.moonshot.cn/*",
       "https://www.kimi.com/*",
       "https://kimi.com/*",
-      "https://www.perplexity.ai/*"
+      "https://www.perplexity.ai/*",
+      "https://grok.com/*",
+      "https://grok.x.ai/*"
     ],
     action: {
       default_title: "Open AI Council"

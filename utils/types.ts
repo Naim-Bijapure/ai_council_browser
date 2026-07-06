@@ -2,7 +2,7 @@ import type { ProbeResult as AutomationProbeResult } from "./automation/types";
 
 export const MAX_USER_PROMPT_LENGTH = 10_000;
 
-export type AppKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "qwen" | "kimi" | "perplexity";
+export type AppKey = "chatgpt" | "claude" | "gemini" | "deepseek" | "qwen" | "kimi" | "perplexity" | "grok";
 
 export type AgentStatus = "pending" | "injecting" | "waiting" | "done" | "timeout" | "error" | "skipped";
 
