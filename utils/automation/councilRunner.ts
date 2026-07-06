@@ -197,12 +197,6 @@ export async function runCouncil(
         session = update({ agentTabUrl: tabUrl });
       }
 
-      // Start URL capture BEFORE sending the prompt so SPA URL changes
-      // (new-chat → conversation) are not missed.
-      const agentUrlCapture = state.councilTabId != null
-        ? startUrlCapture(state.councilTabId, url, timeouts.urlCaptureMs, state)
-        : null;
-
       // Send the prompt and WAIT for the full response, racing against a
       // skip signal so the user can abort a stuck/slow agent.
       const adapterResult = await sendAgentRunWithSkip(
@@ -214,15 +208,28 @@ export async function runCouncil(
         callbacks
       );
 
-      // Resolve URL capture (may have already resolved via listener)
-      const agentChatUrl = agentUrlCapture ? await agentUrlCapture.promise : null;
       if (checkCancelled()) {
-        agentUrlCapture?.cancel();
         break;
       }
 
+      // Capture URL AFTER response completion to get the final conversation URL.
+      // SPAs may change URLs multiple times during a conversation, so we read
+      // the current URL only after the response is complete.
+      let agentChatUrl: string | null = null;
+      if (state.councilTabId != null && (adapterResult.success || adapterResult.skipped)) {
+        try {
+          const tab = await browser.tabs.get(state.councilTabId);
+          const currentUrl = tab.url ?? "";
+          // Only use the URL if it's different from the new-chat URL
+          if (currentUrl && currentUrl !== url && !isNewChatUrl(currentUrl, url)) {
+            agentChatUrl = currentUrl;
+          }
+        } catch {
+          // Tab may have been closed — ignore
+        }
+      }
+
       if (adapterResult.skipped) {
-        agentUrlCapture?.cancel();
         updateAgent(key, {
           status: "skipped",
           errorReason: "skipped",
@@ -374,22 +381,14 @@ export async function runCouncil(
 
     updateJudge({ status: "injecting", startedAt: Date.now() });
 
-    // Start URL capture listener BEFORE sending the judge prompt so SPA URL
-    // changes are not missed.
-    const urlCaptureHandle = state.judgeTabId != null
-      ? startUrlCapture(state.judgeTabId, judgeNewChatUrl, timeouts.urlCaptureMs, state)
-      : null;
-
     const judgeSendResult = state.judgeTabId != null
       ? await sendJudgeRun(judgeKey, state.judgeTabId, judgePrompt.text, timeouts, state)
       : { sent: false, errorReason: "tab_load_timeout" as const };
     if (checkCancelled()) {
-      urlCaptureHandle?.cancel();
       return;
     }
 
     if (!judgeSendResult.sent) {
-      urlCaptureHandle?.cancel();
       updateJudge({
         status: "error",
         errorReason: judgeSendResult.errorReason ?? "send_failed",
@@ -401,8 +400,23 @@ export async function runCouncil(
 
     updateJudge({ status: "sent", completedAt: Date.now() });
 
-    // Step 7: Await the URL capture result (listener was attached before send)
-    const judgeUrl = urlCaptureHandle ? await urlCaptureHandle.promise : null;
+    // Capture URL AFTER response completion to get the final conversation URL.
+    // SPAs may change URLs multiple times during a conversation, so we read
+    // the current URL only after the response is complete.
+    let judgeUrl: string | null = null;
+    if (state.judgeTabId != null) {
+      try {
+        const tab = await browser.tabs.get(state.judgeTabId);
+        const currentUrl = tab.url ?? "";
+        // Only use the URL if it's different from the new-chat URL
+        if (currentUrl && currentUrl !== judgeNewChatUrl && !isNewChatUrl(currentUrl, judgeNewChatUrl)) {
+          judgeUrl = currentUrl;
+        }
+      } catch {
+        // Tab may have been closed — ignore
+      }
+    }
+
     if (checkCancelled()) return;
 
     session = update({ judgeChatUrl: judgeUrl });
@@ -551,89 +565,6 @@ async function sendJudgeRun(
       resolve({ sent: false, errorReason: "content_script_timeout" });
     });
   });
-}
-
-interface UrlCaptureHandle {
-  promise: Promise<string | null>;
-  cancel: () => void;
-}
-
-/**
- * Attaches a tabs.onUpdated listener to capture when the tab navigates away
- * from the new-chat URL to a conversation URL. Used for both agent and judge
- * URL capture. Reads the current tab URL at attach time for race-safety.
- *
- * Returns a handle whose `promise` resolves with the captured URL or null,
- * and a `cancel` function to clean up the listener early.
- */
-function startUrlCapture(
-  tabId: number,
-  newChatUrl: string,
-  timeoutMs: number,
-  state: ActiveRunState
-): UrlCaptureHandle {
-  let settled = false;
-  let resolveFn: (url: string | null) => void;
-
-  const promise = new Promise<string | null>((resolve) => {
-    resolveFn = resolve;
-  });
-
-  const finish = (url: string | null): void => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    browser.tabs.onUpdated.removeListener(listener);
-    state.tabListeners = state.tabListeners.filter((fn) => fn !== removeListener);
-    resolveFn(url);
-  };
-
-  const removeListener = (): void => {
-    browser.tabs.onUpdated.removeListener(listener);
-  };
-
-  const timer = setTimeout(() => {
-    void browser.tabs.get(tabId).then((tab) => {
-      const currentUrl = tab.url ?? "";
-      if (currentUrl && currentUrl !== newChatUrl && !isNewChatUrl(currentUrl, newChatUrl)) {
-        finish(currentUrl);
-      } else {
-        finish(null);
-      }
-    }).catch(() => finish(null));
-  }, timeoutMs);
-
-  const listener = (
-    updatedTabId: number,
-    changeInfo: Browser.tabs.OnUpdatedInfo,
-    updatedTab: Browser.tabs.Tab
-  ) => {
-    if (updatedTabId === tabId && changeInfo.url) {
-      const url = changeInfo.url;
-      if (!isNewChatUrl(url, newChatUrl)) {
-        finish(url);
-      }
-    }
-  };
-
-  state.tabListeners.push(removeListener);
-  browser.tabs.onUpdated.addListener(listener);
-
-  // Race-safety: read current URL at attach time in case it already changed
-  void browser.tabs.get(tabId).then((tab) => {
-    const currentUrl = tab.url ?? "";
-    if (currentUrl && currentUrl !== newChatUrl && !isNewChatUrl(currentUrl, newChatUrl)) {
-      finish(currentUrl);
-    }
-  }).catch(() => {
-    // ignore — listener and timer will handle it
-  });
-
-  const cancel = (): void => {
-    finish(null);
-  };
-
-  return { promise, cancel };
 }
 
 function openTabAndListenForReadyOnExistingTab(
