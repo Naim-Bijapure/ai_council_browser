@@ -1,9 +1,9 @@
 import { browser } from "wxt/browser";
 import { getSupportedApp } from "../appRegistry";
 import { isCapturableChatUrl, isNewChatUrl } from "../chatUrl";
-import { buildJudgePrompt } from "../judgePrompt";
+import { buildJudgePromptAsync } from "../judgePrompt";
 import { saveSession } from "../history";
-import { buildAuthorPrompt, buildRelayJudgePrompt, buildReviewerPrompt } from "../relayPrompt";
+import { buildAuthorPrompt, buildRelayJudgePromptAsync, buildReviewerPrompt } from "../relayPrompt";
 import { parseRelayResponse } from "../relayResponseParser";
 import {
   type ActiveCouncilSession,
@@ -350,12 +350,12 @@ export async function runCouncil(
     await sleep(0);
 
     const judgePrompt = isRelay
-      ? buildRelayJudgePrompt({
+      ? await buildRelayJudgePromptAsync({
           prompt: session.prompt,
           agentResults: session.agentResults,
           finalDraft: currentDraft
         })
-      : buildJudgePrompt({
+      : await buildJudgePromptAsync({
           prompt: session.prompt,
           agentResults: session.agentResults
         });

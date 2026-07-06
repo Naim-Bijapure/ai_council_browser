@@ -3,6 +3,9 @@ import type { AgentResult } from "./types";
 
 const JUDGE_PROMPT_LIMIT = 15_000;
 const SEVERE_AGENT_LIMIT = 2_000;
+const TRIM_SUFFIX = "...";
+const MIN_TRIMMED_SECTION_LENGTH = SEVERE_AGENT_LIMIT + TRIM_SUFFIX.length;
+const MAX_TRIM_ITERATIONS = 64;
 
 interface BuildJudgePromptInput {
   prompt: string;
@@ -38,6 +41,11 @@ export function buildJudgePrompt(input: BuildJudgePromptInput): JudgePromptResul
   }
 
   return { text, trimmed, severelyTrimmed };
+}
+
+export async function buildJudgePromptAsync(input: BuildJudgePromptInput): Promise<JudgePromptResult> {
+  await Promise.resolve();
+  return buildJudgePrompt(input);
 }
 
 function composePrompt(prompt: string, agentSections: string[], note: string): string {
@@ -114,9 +122,13 @@ function formatAgentResult(result: AgentResult): string {
 function trimLongestSections(prompt: string, sections: string[], note: string): string[] {
   const nextSections = [...sections];
 
-  while (composePrompt(prompt, nextSections, note).length > JUDGE_PROMPT_LIMIT) {
-    let longestIndex = 0;
+  for (let iteration = 0; iteration < MAX_TRIM_ITERATIONS; iteration++) {
+    const composedLength = composePrompt(prompt, nextSections, note).length;
+    if (composedLength <= JUDGE_PROMPT_LIMIT) {
+      break;
+    }
 
+    let longestIndex = 0;
     nextSections.forEach((section, index) => {
       if (section.length > nextSections[longestIndex].length) {
         longestIndex = index;
@@ -124,12 +136,18 @@ function trimLongestSections(prompt: string, sections: string[], note: string): 
     });
 
     const longest = nextSections[longestIndex];
-    if (longest.length <= SEVERE_AGENT_LIMIT) {
+    if (longest.length <= MIN_TRIMMED_SECTION_LENGTH) {
       break;
     }
 
-    const reduceBy = Math.max(250, Math.ceil((composePrompt(prompt, nextSections, note).length - JUDGE_PROMPT_LIMIT) / 2));
-    nextSections[longestIndex] = `${longest.slice(0, Math.max(SEVERE_AGENT_LIMIT, longest.length - reduceBy))}...`;
+    const reduceBy = Math.max(250, Math.ceil((composedLength - JUDGE_PROMPT_LIMIT) / 2));
+    const targetLength = Math.max(SEVERE_AGENT_LIMIT, longest.length - reduceBy);
+    const trimmed = `${longest.slice(0, targetLength)}${TRIM_SUFFIX}`;
+    if (trimmed.length >= longest.length) {
+      break;
+    }
+
+    nextSections[longestIndex] = trimmed;
   }
 
   return nextSections;
