@@ -25,6 +25,7 @@ import {
   type CouncilSnapshot,
   type CouncilType,
   type DiagnosticReport,
+  type JudgeStepDetail,
   type JudgeStepStatus,
   type PanelRequest,
   type PanelResponse,
@@ -75,6 +76,19 @@ const JUDGE_STEP_LABELS: Record<JudgeStepStatus, string> = {
   error: "Judge failed",
   timeout: "Judge timed out"
 };
+
+const JUDGE_DETAIL_LABELS: Record<JudgeStepDetail, string> = {
+  preparing_prompt: "Preparing judge prompt…",
+  opening_tab: "Opening judge tab…",
+  sending: "Sending judge prompt…"
+};
+
+function formatJudgeStepLabel(status: JudgeStepStatus, detail?: JudgeStepDetail): string {
+  if (status === "injecting" && detail) {
+    return JUDGE_DETAIL_LABELS[detail];
+  }
+  return JUDGE_STEP_LABELS[status];
+}
 
 const COUNCIL_TYPE_LABELS: Record<CouncilType, string> = {
   agentJudge: "Agent → Judge Council",
@@ -718,7 +732,8 @@ function SessionView({
           <div className="flex items-center justify-between gap-2">
             <strong className="text-sm text-foreground">{formatAppName(session.judgeApp)} (Judge)</strong>
             <Badge variant={STATUS_BADGE_VARIANT[judgeStep.status] ?? "outline"}>
-              {JUDGE_STEP_LABELS[judgeStep.status]}{judgeStep.errorReason ? `: ${judgeStep.errorReason}` : ""}
+              {formatJudgeStepLabel(judgeStep.status, judgeStep.detail)}
+              {judgeStep.errorReason ? `: ${formatErrorReason(judgeStep.errorReason)}` : ""}
             </Badge>
           </div>
         </article>

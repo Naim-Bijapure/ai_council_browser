@@ -25,7 +25,8 @@ export type BgToContentMessage =
       selectors: SelectorGroup;
       mode: ProbeMode;
     }
-  | { type: "CANCEL" };
+  | { type: "CANCEL" }
+  | { type: "NUDGE_READY"; appKey: AppKey };
 
 export type ContentToBgMessage =
   | {

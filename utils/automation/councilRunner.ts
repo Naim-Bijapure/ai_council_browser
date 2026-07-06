@@ -344,7 +344,9 @@ export async function runCouncil(
     // "Waiting…" while we build a potentially large relay judge prompt or
     // navigate the council tab to the judge app.
     session = update({ status: "judge_handoff" });
-    updateJudge({ status: "injecting", startedAt: Date.now() });
+    updateJudge({ status: "injecting", startedAt: Date.now(), detail: "preparing_prompt" });
+
+    await sleep(0);
 
     const judgePrompt = isRelay
       ? buildRelayJudgePrompt({
@@ -358,10 +360,12 @@ export async function runCouncil(
         });
 
     session = update({ judgePrompt: judgePrompt.text });
+    updateJudge({ detail: "opening_tab" });
 
     // Step 6: Navigate the council tab to the judge URL (reuse same tab)
     const judgeKey = session.judgeApp;
     const judgeNewChatUrl = getSupportedApp(judgeKey).newChatUrl;
+    const judgePhaseDeadline = Date.now() + JUDGE_PHASE_TIMEOUT_MS;
 
     if (state.councilTabId == null) {
       // Council tab was closed — open a new one
@@ -434,10 +438,28 @@ export async function runCouncil(
 
     if (await abortIfCancelled(session, callbacks, state, checkCancelled)) return;
 
+    if (Date.now() > judgePhaseDeadline) {
+      updateJudge({
+        status: "error",
+        errorReason: "timeout",
+        completedAt: Date.now()
+      });
+      await finalizeSession(session, callbacks, state);
+      return;
+    }
+
     // Judge phase already marked "injecting" above (includes tab prep).
     // We now perform the actual prompt injection + send confirmation.
+    updateJudge({ detail: "sending" });
     const judgeSendResult = state.judgeTabId != null
-      ? await sendJudgeRun(judgeKey, state.judgeTabId, judgePrompt.text, timeouts, state)
+      ? await sendJudgeRun(
+          judgeKey,
+          state.judgeTabId,
+          judgePrompt.text,
+          timeouts,
+          state,
+          judgePhaseDeadline
+        )
       : { sent: false, errorReason: "tab_load_timeout" as const };
     if (await abortIfCancelled(session, callbacks, state, checkCancelled)) return;
 
@@ -486,7 +508,9 @@ export async function runCouncil(
   }
 }
 
-const JUDGE_SEND_TIMEOUT_MS = 45_000;
+const JUDGE_SEND_TIMEOUT_MS = 90_000;
+const JUDGE_PHASE_TIMEOUT_MS = 180_000;
+const CONTENT_READY_NUDGE_INTERVAL_MS = 4_000;
 
 async function sendCancelToTab(tabId: number, appKey: AppKey): Promise<void> {
   const message: BgToContentMessage = { type: "CANCEL", appKey };
@@ -619,15 +643,19 @@ async function sendJudgeRun(
   tabId: number,
   prompt: string,
   timeouts: AutomationTimeouts,
-  state: ActiveRunState
+  state: ActiveRunState,
+  deadlineMs?: number
 ): Promise<SendConfirmationResult> {
   const selectors = loadSelectorConfig(appKey).selectors;
+  const waitMs = deadlineMs
+    ? Math.max(5_000, Math.min(JUDGE_SEND_TIMEOUT_MS, deadlineMs - Date.now()))
+    : JUDGE_SEND_TIMEOUT_MS;
 
   return new Promise<SendConfirmationResult>((resolve) => {
     const timer = setTimeout(() => {
       removeMessageListener();
       resolve({ sent: false, errorReason: "timeout" });
-    }, JUDGE_SEND_TIMEOUT_MS);
+    }, waitMs);
 
     const listener = (message: ContentToBgMessage, sender: Browser.runtime.MessageSender) => {
       if (message.type === "SEND_CONFIRMED" && message.appKey === appKey && sender.tab?.id === tabId) {
@@ -662,7 +690,24 @@ async function sendJudgeRun(
 
 function isOnTargetChatUrl(tabUrl: string | undefined, newChatUrl: string): boolean {
   if (!tabUrl) return false;
-  return tabUrl === newChatUrl || isNewChatUrl(tabUrl, newChatUrl);
+  if (tabUrl === newChatUrl || isNewChatUrl(tabUrl, newChatUrl)) return true;
+
+  try {
+    const parsed = new URL(tabUrl);
+    const target = new URL(newChatUrl);
+    // SPAs often redirect / to /chat or similar after load — same origin is enough
+    // once navigation to the judge/agent app has completed.
+    return parsed.origin === target.origin;
+  } catch {
+    return false;
+  }
+}
+
+async function nudgeContentReady(tabId: number, appKey: AppKey): Promise<void> {
+  const message: BgToContentMessage = { type: "NUDGE_READY", appKey };
+  await browser.tabs.sendMessage(tabId, message).catch(() => {
+    // Content script may not be injected yet.
+  });
 }
 
 function openTabAndListenForReadyOnExistingTab(
@@ -685,6 +730,8 @@ function openTabAndListenForReadyOnExistingTab(
       settled = true;
       clearTimeout(loadTimer);
       clearTimeout(readyTimer);
+      clearTimeout(absoluteTimer);
+      clearInterval(nudgeTimer);
       browser.tabs.onUpdated.removeListener(tabListener);
       browser.runtime.onMessage.removeListener(messageListener);
       resolve({
@@ -757,6 +804,17 @@ function openTabAndListenForReadyOnExistingTab(
         finish();
       }
     }, contentReadyDeadline - Date.now());
+
+    const absoluteTimer = setTimeout(() => {
+      finish();
+    }, contentReadyDeadline - Date.now() + 5_000);
+
+    const nudgeTimer = setInterval(() => {
+      if (settled || contentReady) return;
+      if (tabLoaded) {
+        void nudgeContentReady(tabId, appKey);
+      }
+    }, CONTENT_READY_NUDGE_INTERVAL_MS);
 
     browser.runtime.onMessage.addListener(messageListener);
     browser.tabs.onUpdated.addListener(tabListener);

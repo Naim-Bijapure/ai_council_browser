@@ -79,6 +79,7 @@ function trimDraft(draft: string, maxChars: number): string {
 
 const RELAY_JUDGE_PROMPT_LIMIT = 15_000;
 const SEVERE_STEP_LIMIT = 2_000;
+const JUDGE_STEP_CONTENT_LIMIT = 4_000;
 
 interface BuildRelayJudgePromptInput {
   prompt: string;
@@ -177,6 +178,11 @@ If nothing needed changing, write: "None — the final draft was sound."
 and whether the final draft is trustworthy.`;
 }
 
+function truncateForJudgeStep(text: string): string {
+  if (text.length <= JUDGE_STEP_CONTENT_LIMIT) return text;
+  return `${text.slice(0, JUDGE_STEP_CONTENT_LIMIT)}...`;
+}
+
 function formatRelayStep(result: AgentResult): string {
   const appName = getSupportedApp(result.agentKey).displayName;
   const role = result.relayRole === "author" ? "Author" : "Reviewer";
@@ -184,10 +190,10 @@ function formatRelayStep(result: AgentResult): string {
   if (result.status === "done") {
     const parts = [`### Step — ${appName} (${role})`];
     if (result.critiqueText) {
-      parts.push(`**Critique:**\n${result.critiqueText}`);
+      parts.push(`**Critique:**\n${truncateForJudgeStep(result.critiqueText)}`);
     }
     const answer = result.revisedAnswerText ?? result.responseText;
-    parts.push(`**Revised answer:**\n${answer}`);
+    parts.push(`**Revised answer:**\n${truncateForJudgeStep(answer)}`);
     return parts.join("\n\n");
   }
 

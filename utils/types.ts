@@ -38,9 +38,12 @@ export type JudgeStepStatus =
   | "error"
   | "timeout";
 
+export type JudgeStepDetail = "preparing_prompt" | "opening_tab" | "sending";
+
 export interface JudgeStep {
   status: JudgeStepStatus;
   errorReason?: string;
+  detail?: JudgeStepDetail;
   startedAt: number | null;
   completedAt: number | null;
 }
