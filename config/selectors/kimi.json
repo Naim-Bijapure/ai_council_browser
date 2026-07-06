@@ -1,6 +1,6 @@
 {
   "appKey": "kimi",
-  "_comment": "Verified 2026-07-01. Input is contenteditable div.chat-input-editor[role='textbox']. No send button visible in DOM (no aria-label, no class) — relies on Enter-key submission. Stop indicator div.send-button-container.stop appears during generation (thinking/tool calls) and disappears on completion — primary completion indicator. Response container div.chat-content-item.chat-content-item-assistant appears after message sent. Clean answer text in div.markdown-container (excludes thinking/tool-call text in div.toolcall-content).",
+  "_comment": "Verified 2026-07-06. Input is contenteditable div.chat-input-editor[role='textbox']. Send control is a DIV (not a button), div.send-button-container — no aria-label, no role='button'. It carries a 'disabled' class token when the input is empty and a 'stop' class token while generating (class='send-button-container disabled stop'); with text typed and idle it has neither. Enter-key submission is NOT used as a fallback since the input is contenteditable (Enter inserts a newline instead of submitting), so this click selector is the ONLY submission path — it must match. Stop indicator (same element) div.send-button-container.stop appears during generation (thinking/tool calls) and disappears on completion — primary completion indicator. Response container div.chat-content-item.chat-content-item-assistant appears after message sent. Clean answer text in div.markdown-container (excludes thinking/tool-call text in div.toolcall-content).",
   "selectors": {
     "input": [
       "div.chat-input-editor[role='textbox'][contenteditable='true']",
@@ -8,6 +8,8 @@
       "div[role='textbox'][contenteditable='true']"
     ],
     "send": [
+      "div.send-button-container:not(.disabled)",
+      "div.send-button-container",
       "div[role='button'][aria-label='Send']",
       "button[aria-label='Send']",
       "div.send-button"

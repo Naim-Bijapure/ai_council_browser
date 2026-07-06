@@ -39,6 +39,17 @@ const SEND_CONFIRMATION_POLL_MS = 300;
 // Prevents "Searching the web" / "Thinking..." transient text from triggering premature completion
 // on apps whose stop button appears slightly after generation begins (e.g. Gemini web-search mode).
 const STOP_BUTTON_GRACE_MS = 6_000;
+// Debounce before treating a stop-button disappearance as final completion.
+// Reasoning models (Qwen, and similar "thinking" models) briefly hide the stop
+// button in the gap between the thinking phase ending and the answer phase
+// starting. Without this debounce, that flicker is mistaken for completion and
+// the response is extracted mid-"Thinking..." (e.g. an 11-char stub instead of
+// the real answer). Requiring the button to stay gone for this long before
+// declaring completion survives that gap while still reacting quickly once the
+// button is genuinely gone for good. Symmetric with STOP_BUTTON_GRACE_MS (same
+// class of problem on the other end of generation) — biased toward avoiding a
+// truncated response over shaving a few seconds off every agent's run.
+const STOP_BUTTON_DISAPPEAR_DEBOUNCE_MS = 6_000;
 
 function submitViaEnterKey(inputElement: HTMLElement): void {
   // Focus the element to ensure key events are received
@@ -408,6 +419,11 @@ async function waitForResponseCompletion(
 ): Promise<ResponseWaitResult> {
   return new Promise<ResponseWaitResult>((resolve) => {
     let stopButtonWasVisible = false;
+    // Timestamp of when the stop button most recently disappeared after
+    // having been visible. Reset to null whenever it reappears. Used to
+    // debounce the "thinking → answering" flicker some reasoning models
+    // (Qwen) exhibit, where the stop button briefly vanishes between phases.
+    let stopButtonGoneSince: number | null = null;
     let lastText = "";
     const monitorStartTime = Date.now();
     let lastTextChangeTime = monitorStartTime;
@@ -439,8 +455,21 @@ async function waitForResponseCompletion(
       const stopButton = queryFirstSelector(selectors.completion);
       if (stopButton) {
         stopButtonWasVisible = true;
+        // Button is back — this was a transient flicker (e.g. Qwen's
+        // thinking → answering gap), not real completion. Reset the timer.
+        stopButtonGoneSince = null;
       } else if (stopButtonWasVisible) {
-        return "stop button disappeared";
+        if (stopButtonGoneSince === null) {
+          stopButtonGoneSince = Date.now();
+        }
+        const goneMs = Date.now() - stopButtonGoneSince;
+        if (goneMs >= STOP_BUTTON_DISAPPEAR_DEBOUNCE_MS) {
+          return "stop button disappeared";
+        }
+        // Still within the debounce window — the button may reappear for the
+        // answer phase (Qwen-style thinking → answering gap). Don't declare
+        // completion yet; wait for either the debounce to elapse or the
+        // button to come back (handled in the `if (stopButton)` branch above).
       }
 
       // Signal 2: Text content stabilization (fallback)
