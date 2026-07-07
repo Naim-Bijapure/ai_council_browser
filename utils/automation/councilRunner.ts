@@ -353,7 +353,8 @@ export async function runCouncil(
       ? await buildRelayJudgePromptAsync({
           prompt: session.prompt,
           agentResults: session.agentResults,
-          finalDraft: currentDraft
+          finalDraft: currentDraft,
+          templateId: session.judgePromptTemplateId
         })
       : await buildJudgePromptAsync({
           prompt: session.prompt,

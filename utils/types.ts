@@ -66,6 +66,7 @@ export interface CouncilPreferences {
   selectedAgentKeys: AppKey[];
   judgeKey: AppKey;
   judgePromptTemplateId?: string;
+  relayJudgePromptTemplateId?: string;
 }
 
 export interface AgentResult {

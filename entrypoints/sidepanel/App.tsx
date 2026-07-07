@@ -43,6 +43,10 @@ import {
   DEFAULT_JUDGE_PROMPT_TEMPLATE_ID,
   JUDGE_PROMPT_TEMPLATES
 } from "../../utils/judgePromptTemplates";
+import {
+  DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID,
+  RELAY_JUDGE_PROMPT_TEMPLATES
+} from "../../utils/relayJudgePromptTemplates";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -128,7 +132,11 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [selectedAgents, setSelectedAgents] = useState<AppKey[]>(DEFAULT_AGENT_KEYS);
   const [judgeKey, setJudgeKey] = useState<AppKey>(DEFAULT_JUDGE_KEY);
-  const [promptTemplateId, setPromptTemplateId] = useState(DEFAULT_JUDGE_PROMPT_TEMPLATE_ID);
+  const [agentJudgeTemplateId, setAgentJudgeTemplateId] = useState(DEFAULT_JUDGE_PROMPT_TEMPLATE_ID);
+  const [relayTemplateId, setRelayTemplateId] = useState(DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID);
+
+  const currentTemplateId = councilType === "relay" ? relayTemplateId : agentJudgeTemplateId;
+  const currentTemplates = councilType === "relay" ? RELAY_JUDGE_PROMPT_TEMPLATES : JUDGE_PROMPT_TEMPLATES;
   const [snapshot, setSnapshot] = useState<CouncilSnapshot>(idleSnapshot);
   const [history, setHistory] = useState<StoredCouncilSession[]>([]);
   const [error, setError] = useState("");
@@ -176,7 +184,7 @@ export default function App() {
     if (!loading) {
       void savePreferences();
     }
-  }, [councilType, selectedAgents, judgeKey, promptTemplateId]);
+  }, [councilType, selectedAgents, judgeKey, agentJudgeTemplateId, relayTemplateId]);
 
   async function sendMessage(request: PanelRequest): Promise<PanelResponse> {
     return browser.runtime.sendMessage(request);
@@ -201,7 +209,10 @@ export default function App() {
           setJudgeKey(response.preferences.judgeKey);
         }
         if (response.preferences.judgePromptTemplateId) {
-          setPromptTemplateId(response.preferences.judgePromptTemplateId);
+          setAgentJudgeTemplateId(response.preferences.judgePromptTemplateId);
+        }
+        if (response.preferences.relayJudgePromptTemplateId) {
+          setRelayTemplateId(response.preferences.relayJudgePromptTemplateId);
         }
       }
     } else {
@@ -216,7 +227,8 @@ export default function App() {
       councilType,
       selectedAgentKeys: selectedAgents,
       judgeKey,
-      judgePromptTemplateId: promptTemplateId
+      judgePromptTemplateId: agentJudgeTemplateId,
+      relayJudgePromptTemplateId: relayTemplateId
     };
     await sendMessage({ type: "SAVE_PREFERENCES", preferences });
   }
@@ -269,7 +281,7 @@ export default function App() {
           judgeKey,
           councilType,
           windowId,
-          judgePromptTemplateId: promptTemplateId
+          judgePromptTemplateId: currentTemplateId
         }
     });
 
@@ -452,12 +464,18 @@ export default function App() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={promptTemplateId} onValueChange={setPromptTemplateId}>
+                  <Select value={currentTemplateId} onValueChange={(id) => {
+                    if (councilType === "relay") {
+                      setRelayTemplateId(id);
+                    } else {
+                      setAgentJudgeTemplateId(id);
+                    }
+                  }}>
                     <SelectTrigger className="flex-1 min-w-0">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {JUDGE_PROMPT_TEMPLATES.map((t) => (
+                      {currentTemplates.map((t) => (
                         <SelectItem key={t.id} value={t.id}>
                           {t.name}
                         </SelectItem>
