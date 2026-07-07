@@ -624,6 +624,12 @@ function relayStepLabel(role: AgentResult["relayRole"]): string {
   return role === "author" ? "Author" : role === "reviewer" ? "Reviewer" : "Agent";
 }
 
+function resolveTemplateName(councilType: CouncilType, templateId: string): string {
+  const templates = councilType === "relay" ? RELAY_JUDGE_PROMPT_TEMPLATES : JUDGE_PROMPT_TEMPLATES;
+  const match = templates.find((t) => t.id === templateId);
+  return match ? match.name : templateId;
+}
+
 function SessionView({
   expandedAgent,
   isRunning,
@@ -647,7 +653,14 @@ function SessionView({
       <div className="rounded-lg border border-border bg-card p-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">Question</span>
-          {isRelay ? <Badge variant="outline">Relay</Badge> : <Badge variant="outline">Council</Badge>}
+          <div className="flex items-center gap-2">
+            {session.judgePromptTemplateId && (
+              <Badge variant="secondary" className="text-xs">
+                {resolveTemplateName(session.councilType, session.judgePromptTemplateId)}
+              </Badge>
+            )}
+            {isRelay ? <Badge variant="outline">Relay</Badge> : <Badge variant="outline">Council</Badge>}
+          </div>
         </div>
         <p className="mt-1 text-foreground">{truncateText(session.prompt, 180)}</p>
       </div>
