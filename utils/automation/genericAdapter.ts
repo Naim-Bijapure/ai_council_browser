@@ -122,7 +122,8 @@ function normalizePromptLength(text: string): number {
 async function ensurePromptInjected(
   appKey: AppKey,
   inputElement: HTMLElement,
-  prompt: string
+  prompt: string,
+  selectors?: SelectorGroup
 ): Promise<boolean> {
   let injectedLength = normalizePromptLength(getInputText(inputElement));
   const expectedLength = normalizePromptLength(prompt);
@@ -130,19 +131,28 @@ async function ensurePromptInjected(
     return true;
   }
 
+  if (selectors && expectedLength > 0 && injectedLength < expectedLength * 0.5) {
+    const freshInput = queryFirstSelector(selectors.input) as HTMLElement | null;
+    if (freshInput && freshInput !== inputElement) {
+      injectedLength = normalizePromptLength(getInputText(freshInput));
+    }
+  }
+
   if (appKey === "chatgpt" && hasChatGptLongPromptPreview()) {
     await expandChatGptLongPromptPreview();
     await sleep(300);
-    injectedLength = normalizePromptLength(getInputText(inputElement));
+    const verifySource = selectors ? (queryFirstSelector(selectors.input) as HTMLElement | null) ?? inputElement : inputElement;
+    injectedLength = normalizePromptLength(getInputText(verifySource));
     if (expectedLength > 0 && injectedLength >= expectedLength * 0.85) {
       return true;
     }
   }
 
   if (expectedLength > 0 && injectedLength < expectedLength * 0.5) {
-    await setInputText(inputElement, prompt, { appKey });
+    const reInjectTarget = selectors ? (queryFirstSelector(selectors.input) as HTMLElement | null) ?? inputElement : inputElement;
+    await setInputText(reInjectTarget, prompt, { appKey });
     await sleep(200);
-    injectedLength = normalizePromptLength(getInputText(inputElement));
+    injectedLength = normalizePromptLength(getInputText(reInjectTarget));
   }
 
   return expectedLength === 0 || injectedLength >= expectedLength * 0.5;
@@ -310,7 +320,7 @@ async function runAgentInner(
   }
 
   await sleep(100);
-  if (!(await ensurePromptInjected(appKey, inputElement, prompt))) {
+  if (!(await ensurePromptInjected(appKey, inputElement, prompt, selectors))) {
     log(appKey, "FAILED: text not injected (empty or truncated after set)");
     return { success: false, errorReason: "dom_error", completedAt: Date.now() };
   }
@@ -437,7 +447,7 @@ async function runJudgeInner(
   }
 
   await sleep(100);
-  if (!(await ensurePromptInjected(appKey, inputElement, prompt))) {
+  if (!(await ensurePromptInjected(appKey, inputElement, prompt, selectors))) {
     log(appKey, "FAILED: judge prompt not injected (empty or truncated after set)");
     return { sent: false, errorReason: "dom_error" };
   }
