@@ -1,7 +1,7 @@
 {
-  "name": "ai-counseling-extension",
+  "name": "ai-council-browser",
   "version": "0.1.0",
-  "description": "AI Council — multi-LLM council workflows from a Chrome side panel.",
+  "description": "AI Council Browser — multi-LLM council workflows from a Chrome side panel.",
   "type": "module",
   "private": true,
   "scripts": {

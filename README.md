@@ -1,6 +1,6 @@
-# AI Council
+# AI Council Browser
 
-A Chrome/Brave extension built with WXT, React, TypeScript, and Manifest V3.
+A Chrome/Brave extension (`ai-council-browser`) built with WXT, React, TypeScript, and Manifest V3.
 
 The extension automates a configurable AI Council workflow: it sends your prompt to one or more selected LLM **agents** in parallel (ChatGPT, Claude, Gemini, DeepSeek, Qwen, Kimi, Perplexity, Grok), extracts each response, builds a structured judge prompt from the successful responses, submits it to a selected **judge** app, confirms the message was sent, and captures the judge's conversation permalink. The judge response is never captured — you read the verdict directly in the judge tab.
 
@@ -14,7 +14,7 @@ This project is distributed as a **dev preview** (not on the Chrome Web Store).
 
 Short version:
 
-1. Download `ai-council-vX.Y.Z.zip` from [GitHub Releases](../../releases).
+1. Download `ai-council-browser-vX.Y.Z.zip` from [GitHub Releases](../../releases).
 2. Unzip to a permanent folder.
 3. Open `chrome://extensions` (or `brave://extensions`) → enable **Developer mode**.
 4. **Load unpacked** → select the folder that contains `manifest.json` (not the `.zip` itself).
@@ -233,7 +233,7 @@ Create a distributable zip and copy it to `releases/`:
 
 ```bash
 npm run release
-# → releases/ai-council-v0.1.0.zip
+# → releases/ai-council-browser-v0.1.0.zip
 ```
 
 (`npm run zip` only builds the zip under `.output/` without copying.)
@@ -242,12 +242,12 @@ npm run release
 
 ```bash
 npm run release
-gh release create v0.1.0 releases/ai-council-v0.1.0.zip \
+gh release create v0.1.0 releases/ai-council-browser-v0.1.0.zip \
   --title "v0.1.0 — Dev preview" \
   --notes "Pre-built extension for load-unpacked install. See INSTALL.md."
 ```
 
-Or create the release in the GitHub UI and upload `releases/ai-council-v0.1.0.zip` as an asset.
+Or create the release in the GitHub UI and upload `releases/ai-council-browser-v0.1.0.zip` as an asset.
 
 ## Load In Chrome Or Brave
 

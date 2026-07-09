@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Copies the latest WXT zip from .output/ into releases/ai-council-v{version}.zip
+ * Copies the latest WXT zip from .output/ into releases/ai-council-browser-v{version}.zip
  * so GitHub Releases (or manual sharing) has a stable artifact path.
  *
  * Usage: npm run release
@@ -37,7 +37,7 @@ if (zips.length === 0) {
 const source = zips[0];
 mkdirSync(releasesDir, { recursive: true });
 
-const destName = `ai-council-v${version}.zip`;
+const destName = `ai-council-browser-v${version}.zip`;
 const destPath = join(releasesDir, destName);
 copyFileSync(source.path, destPath);
 

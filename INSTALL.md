@@ -10,11 +10,11 @@ This is a **dev preview** release. The extension is **not** on the Chrome Web St
 
 ## Install from a release zip (recommended)
 
-1. Download `ai-council-vX.Y.Z.zip` from this repo’s **[GitHub Releases](../../releases)** page  
+1. Download `ai-council-browser-vX.Y.Z.zip` from this repo’s **[GitHub Releases](../../releases)** page  
    (or use the file from `releases/` if you built it yourself).
 2. **Unzip** it somewhere permanent, for example:
-   - `~/Extensions/ai-council/`
-   - `C:\Extensions\ai-council\`
+   - `~/Extensions/ai-council-browser/`
+   - `C:\Extensions\ai-council-browser\`
 3. Open the extensions page:
    - Chrome: `chrome://extensions`
    - Brave: `brave://extensions`
@@ -70,7 +70,7 @@ For packaging a zip yourself:
 
 ```bash
 npm run release
-# → releases/ai-council-v0.1.0.zip
+# → releases/ai-council-browser-v0.1.0.zip
 ```
 
 See the main [README](./README.md) for development details.
