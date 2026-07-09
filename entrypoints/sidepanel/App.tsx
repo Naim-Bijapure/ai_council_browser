@@ -56,6 +56,15 @@ import {
   DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID,
   PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES
 } from "../../utils/promptRefinerJudgePromptTemplates";
+import {
+  DEFAULT_DEBATE_JUDGE_PROMPT_TEMPLATE_ID,
+  DEBATE_JUDGE_PROMPT_TEMPLATES
+} from "../../utils/debateJudgePromptTemplates";
+import {
+  DEFAULT_DEBATE_ROUNDS,
+  MIN_DEBATE_ROUNDS,
+  MAX_DEBATE_ROUNDS
+} from "../../utils/debateTurns";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -111,7 +120,8 @@ const COUNCIL_TYPE_LABELS: Record<CouncilType, string> = {
   agentJudge: "Agent → Judge Council",
   relay: "Relay Council",
   redTeam: "Red Team Council",
-  promptRefiner: "Prompt Refiner"
+  promptRefiner: "Prompt Refiner",
+  debate: "Debate"
 };
 
 const RED_TEAM_ROLE_LABELS: Record<RedTeamRole, string> = {
@@ -153,17 +163,21 @@ export default function App() {
   const [relayTemplateId, setRelayTemplateId] = useState(DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID);
   const [redTeamTemplateId, setRedTeamTemplateId] = useState(DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID);
   const [promptRefinerTemplateId, setPromptRefinerTemplateId] = useState(DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID);
+  const [debateTemplateId, setDebateTemplateId] = useState(DEFAULT_DEBATE_JUDGE_PROMPT_TEMPLATE_ID);
+  const [debateRounds, setDebateRounds] = useState<number>(DEFAULT_DEBATE_ROUNDS);
   const [redTeamRoles, setRedTeamRoles] = useState<Partial<Record<AppKey, RedTeamRole>>>({});
 
   const currentTemplateId =
     councilType === "relay" ? relayTemplateId
     : councilType === "redTeam" ? redTeamTemplateId
     : councilType === "promptRefiner" ? promptRefinerTemplateId
+    : councilType === "debate" ? debateTemplateId
     : agentJudgeTemplateId;
   const currentTemplates =
     councilType === "relay" ? RELAY_JUDGE_PROMPT_TEMPLATES
     : councilType === "redTeam" ? RED_TEAM_JUDGE_PROMPT_TEMPLATES
     : councilType === "promptRefiner" ? PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES
+    : councilType === "debate" ? DEBATE_JUDGE_PROMPT_TEMPLATES
     : JUDGE_PROMPT_TEMPLATES;
   const [snapshot, setSnapshot] = useState<CouncilSnapshot>(idleSnapshot);
   const [history, setHistory] = useState<StoredCouncilSession[]>([]);
@@ -175,7 +189,7 @@ export default function App() {
   const [probeRunning, setProbeRunning] = useState(false);
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
   const [probeError, setProbeError] = useState("");
-  const [expandedAgent, setExpandedAgent] = useState<AppKey | null>(null);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   const activeSession = snapshot.state === "active" ? snapshot.session : null;
   const isRunning = activeSession ? isActiveCouncilRun(activeSession) : false;
@@ -199,7 +213,8 @@ export default function App() {
     !isRunning &&
     !loading &&
     selectedAgents.length > 0 &&
-    (councilType !== "redTeam" || redTeamValid);
+    (councilType !== "redTeam" || redTeamValid) &&
+    (councilType !== "debate" || selectedAgents.length >= 2);
 
   // Load saved preferences on mount
   useEffect(() => {
@@ -231,7 +246,7 @@ export default function App() {
     if (!loading) {
       void savePreferences();
     }
-  }, [councilType, selectedAgents, judgeKey, agentJudgeTemplateId, relayTemplateId, redTeamTemplateId, promptRefinerTemplateId, redTeamRoles]);
+  }, [councilType, selectedAgents, judgeKey, agentJudgeTemplateId, relayTemplateId, redTeamTemplateId, promptRefinerTemplateId, debateTemplateId, debateRounds, redTeamRoles]);
 
   async function sendMessage(request: PanelRequest): Promise<PanelResponse> {
     return browser.runtime.sendMessage(request);
@@ -267,6 +282,12 @@ export default function App() {
         if (response.preferences.promptRefinerJudgePromptTemplateId) {
           setPromptRefinerTemplateId(response.preferences.promptRefinerJudgePromptTemplateId);
         }
+        if (response.preferences.debateJudgePromptTemplateId) {
+          setDebateTemplateId(response.preferences.debateJudgePromptTemplateId);
+        }
+        if (typeof response.preferences.debateRounds === "number") {
+          setDebateRounds(response.preferences.debateRounds);
+        }
         if (response.preferences.redTeamRoles) {
           setRedTeamRoles(response.preferences.redTeamRoles);
         }
@@ -287,7 +308,9 @@ export default function App() {
       relayJudgePromptTemplateId: relayTemplateId,
       redTeamRoles,
       redTeamJudgePromptTemplateId: redTeamTemplateId,
-      promptRefinerJudgePromptTemplateId: promptRefinerTemplateId
+      promptRefinerJudgePromptTemplateId: promptRefinerTemplateId,
+      debateRounds,
+      debateJudgePromptTemplateId: debateTemplateId
     };
     await sendMessage({ type: "SAVE_PREFERENCES", preferences });
   }
@@ -384,7 +407,8 @@ export default function App() {
           councilType,
           windowId,
           judgePromptTemplateId: currentTemplateId,
-          redTeamRoles: redTeamRolesArr
+          redTeamRoles: redTeamRolesArr,
+          debateRounds: councilType === "debate" ? debateRounds : undefined
         }
     });
 
@@ -484,7 +508,9 @@ export default function App() {
                 ? `Red team: ${redTeamAuthors}A · ${redTeamAttackers}⚔ · ${redTeamDefenders}🛡 → ${formatAppName(judgeKey)} judge`
                 : councilType === "promptRefiner"
                   ? `Prompt refiner: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} final prompt`
-                  : `Relay: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} judge`}
+                  : councilType === "debate"
+                    ? `Debate: ${selectedAgents.length} debater${selectedAgents.length !== 1 ? "s" : ""} · ${debateRounds} round${debateRounds !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} moderator`
+                    : `Relay: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} judge`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -506,13 +532,13 @@ export default function App() {
         <section className="flex-1 p-4">
           {activeSession ? (
             <SessionView
-              expandedAgent={expandedAgent}
+              expandedIndex={expandedIndex}
               isRunning={isRunning}
               onCancel={cancelCouncil}
               onNewQuestion={newQuestion}
               onSkipAgent={handleSkipAgent}
               onSwitchToJudge={switchToJudge}
-              onToggleAgent={setExpandedAgent}
+              onToggleAgent={setExpandedIndex}
               session={activeSession}
             />
           ) : (
@@ -578,6 +604,8 @@ export default function App() {
                       setRedTeamTemplateId(id);
                     } else if (councilType === "promptRefiner") {
                       setPromptRefinerTemplateId(id);
+                    } else if (councilType === "debate") {
+                      setDebateTemplateId(id);
                     } else {
                       setAgentJudgeTemplateId(id);
                     }
@@ -596,9 +624,38 @@ export default function App() {
                 </div>
               </div>
 
+              {councilType === "debate" ? (
+                <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="debate-rounds">Debate rounds</Label>
+                    <span className="text-sm font-semibold text-foreground">
+                      {debateRounds} round{debateRounds !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <input
+                    id="debate-rounds"
+                    type="range"
+                    min={MIN_DEBATE_ROUNDS}
+                    max={MAX_DEBATE_ROUNDS}
+                    step={1}
+                    value={debateRounds}
+                    onChange={(e) => setDebateRounds(Number(e.target.value))}
+                    className="w-full accent-primary cursor-pointer"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Each round is one full rebuttal pass over all debaters. More rounds go deeper but take noticeably longer to run.
+                  </p>
+                  {debateRounds >= 3 ? (
+                    <p className="text-xs text-warning">
+                      Heads up: {debateRounds} rounds means {selectedAgents.length} debaters speak {1 + debateRounds} times each — this run will take a while.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
               <fieldset className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
                 <legend className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  {councilType === "relay" ? "Relay order" : councilType === "redTeam" ? "Red team roles" : councilType === "promptRefiner" ? "Refinement order" : "Agents"}
+                  {councilType === "relay" ? "Relay order" : councilType === "redTeam" ? "Red team roles" : councilType === "promptRefiner" ? "Refinement order" : councilType === "debate" ? "Debaters" : "Agents"}
                 </legend>
                 {councilType === "relay" && selectedAgents.length === 1 ? (
                   <p className="mb-1 text-xs text-muted-foreground">
@@ -613,6 +670,11 @@ export default function App() {
                 {councilType === "promptRefiner" ? (
                   <p className="mb-1 text-xs text-muted-foreground">
                     Runs in the order shown (drag to reorder): the Drafter enhances your prompt, each Enhancer refines it further, and the Judge outputs the final prompt. Agents improve the prompt — they do not answer it.
+                  </p>
+                ) : null}
+                {councilType === "debate" ? (
+                  <p className="mb-1 text-xs text-muted-foreground">
+                    Tick at least 2 debaters (drag to reorder). Each one gives an opening statement top-to-bottom, then counters the others once per round. When the rounds finish, the Moderator reviews the whole debate and delivers the verdict.
                   </p>
                 ) : null}
                 <AgentOrderList
@@ -636,9 +698,12 @@ export default function App() {
                   Red team needs exactly one Author, at least one Attacker, and at least one Defender.
                 </InlineError>
               ) : null}
+              {councilType === "debate" && selectedAgents.length === 1 ? (
+                <InlineError>Debate needs at least 2 debaters.</InlineError>
+              ) : null}
 
               <Button disabled={!canRun} type="submit">
-                {councilType === "relay" ? "Run relay" : councilType === "redTeam" ? "Run red team" : councilType === "promptRefiner" ? "Run refiner" : "Run council"}
+                {councilType === "relay" ? "Run relay" : councilType === "redTeam" ? "Run red team" : councilType === "promptRefiner" ? "Run refiner" : councilType === "debate" ? "Run debate" : "Run council"}
               </Button>
 
               {SHOW_DEV_TOOLS && councilType === "agentJudge" ? (
@@ -740,13 +805,13 @@ function InlineError({ children }: { children: React.ReactNode }) {
 }
 
 interface SessionViewProps {
-  expandedAgent: AppKey | null;
+  expandedIndex: number | null;
   isRunning: boolean;
   onCancel: () => Promise<void>;
   onNewQuestion: () => Promise<void>;
   onSkipAgent: (agentKey: AppKey) => Promise<void>;
   onSwitchToJudge: () => Promise<void>;
-  onToggleAgent: (key: AppKey | null) => void;
+  onToggleAgent: (index: number | null) => void;
   session: NonNullable<CouncilSnapshot["session"]>;
 }
 
@@ -774,7 +839,7 @@ function resolveTemplateName(councilType: CouncilType, templateId: string): stri
 }
 
 function SessionView({
-  expandedAgent,
+  expandedIndex,
   isRunning,
   onCancel,
   onNewQuestion,
@@ -786,19 +851,44 @@ function SessionView({
   const isRelay = session.councilType === "relay";
   const isRedTeam = session.councilType === "redTeam";
   const isPromptRefiner = session.councilType === "promptRefiner";
-  const isSequential = isRelay || isRedTeam || isPromptRefiner;
+  const isDebate = session.councilType === "debate";
+  // Chained-draft types carry a single evolving draft + revised-answer sections.
+  const isChainedDraft = isRelay || isRedTeam || isPromptRefiner;
+  // Stepwise = shown as an ordered sequence with "Step X of Y" progress.
+  const isStepwise = isChainedDraft || isDebate;
   const judgeStep = session.judgeStep ?? { status: "pending" as JudgeStepStatus, startedAt: null, completedAt: null };
   const isHandoff = session.status === "done" || session.status === "partial" || judgeStep.status === "sent";
   const completedAgents = session.agentResults.filter((r) => r.status === "done" || r.status === "error" || r.status === "timeout" || r.status === "skipped").length;
   const totalAgents = session.agentResults.length;
   const activeAgent = session.agentResults.find((r) => r.status === "injecting" || r.status === "waiting");
-  const showFinalDraft = isSequential && session.relayFinalDraft && !isRunning && judgeStep.status !== "sent";
+  const showFinalDraft = isChainedDraft && session.relayFinalDraft && !isRunning && judgeStep.status !== "sent";
+  const debateTurnLabel = (result: AgentResult): string =>
+    result.debatePhase === "opening" ? "Opening" : `Rebuttal · R${result.debateRound ?? 1}`;
   const stepLabel = (result: AgentResult): string =>
     isRedTeam
       ? redTeamStepLabel(result.redTeamRole)
       : isPromptRefiner
         ? promptRefinerStepLabel(result.relayRole)
-        : relayStepLabel(result.relayRole);
+        : isDebate
+          ? debateTurnLabel(result)
+          : relayStepLabel(result.relayRole);
+
+  // For debate, group the turn-per-entry results back into one card per debater
+  // (in first-appearance / opening order) so the list stays compact; each
+  // debater's card shows a status chip per phase (Opening, R1, R2, ...).
+  const debateGroups: { agentKey: AppKey; turns: { result: AgentResult; index: number }[] }[] = [];
+  if (isDebate) {
+    const byKey = new Map<AppKey, number>();
+    session.agentResults.forEach((result, index) => {
+      let groupIndex = byKey.get(result.agentKey);
+      if (groupIndex === undefined) {
+        groupIndex = debateGroups.length;
+        byKey.set(result.agentKey, groupIndex);
+        debateGroups.push({ agentKey: result.agentKey, turns: [] });
+      }
+      debateGroups[groupIndex].turns.push({ result, index });
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -811,7 +901,7 @@ function SessionView({
                 {resolveTemplateName(session.councilType, session.judgePromptTemplateId)}
               </Badge>
             )}
-            {isRedTeam ? <Badge variant="outline">Red Team</Badge> : isPromptRefiner ? <Badge variant="outline">Prompt Refiner</Badge> : isRelay ? <Badge variant="outline">Relay</Badge> : <Badge variant="outline">Council</Badge>}
+            {isRedTeam ? <Badge variant="outline">Red Team</Badge> : isPromptRefiner ? <Badge variant="outline">Prompt Refiner</Badge> : isDebate ? <Badge variant="outline">Debate</Badge> : isRelay ? <Badge variant="outline">Relay</Badge> : <Badge variant="outline">Council</Badge>}
           </div>
         </div>
         <p className="mt-1 text-foreground">{truncateText(session.prompt, 180)}</p>
@@ -823,12 +913,12 @@ function SessionView({
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>
               {session.status === "judge_handoff"
-                ? `${isRedTeam ? "Red team" : isPromptRefiner ? "Refinement" : "Relay"} complete — handing off to ${formatAppName(session.judgeApp)} judge`
-                : isSequential
+                ? `${isRedTeam ? "Red team" : isPromptRefiner ? "Refinement" : isDebate ? "Debate" : "Relay"} complete — handing off to ${formatAppName(session.judgeApp)} ${isDebate ? "moderator" : "judge"}`
+                : isStepwise
                   ? `Step ${Math.min(completedAgents + 1, totalAgents)} of ${totalAgents}`
                   : `${completedAgents} / ${totalAgents} agents complete`}
             </span>
-            {isSequential && activeAgent && session.status === "running" ? (
+            {isStepwise && activeAgent && session.status === "running" ? (
               <span>{stepLabel(activeAgent)}: {formatAppName(activeAgent.agentKey)}</span>
             ) : null}
           </div>
@@ -845,24 +935,37 @@ function SessionView({
       ) : null}
 
       <div className="grid gap-2">
-        {session.agentResults.map((result) => {
+        {isDebate ? (
+          debateGroups.map((group) => (
+            <DebateGroupCard
+              key={group.agentKey}
+              agentKey={group.agentKey}
+              turns={group.turns}
+              expandedIndex={expandedIndex}
+              isRunning={isRunning}
+              onToggleAgent={onToggleAgent}
+              onSkipAgent={onSkipAgent}
+            />
+          ))
+        ) : (
+          session.agentResults.map((result, index) => {
           const hasResult = result.status === "done" && result.responseText;
-          const isExpanded = expandedAgent === result.agentKey;
+          const isExpanded = expandedIndex === index;
           return (
             <article
-              key={result.agentKey}
+              key={`${result.agentKey}-${index}`}
               className={cn(
                 "rounded-md border border-border border-l-[3px] bg-card p-3 transition-colors",
                 AGENT_STATUS_BORDER[result.status] ?? "border-l-muted-foreground",
                 hasResult && "cursor-pointer hover:bg-secondary"
               )}
-              onClick={hasResult ? () => onToggleAgent(isExpanded ? null : result.agentKey) : undefined}
+              onClick={hasResult ? () => onToggleAgent(isExpanded ? null : index) : undefined}
               role={hasResult ? "button" : undefined}
               tabIndex={hasResult ? 0 : undefined}
               onKeyDown={hasResult ? (e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  onToggleAgent(isExpanded ? null : result.agentKey);
+                  onToggleAgent(isExpanded ? null : index);
                 }
               } : undefined}
             >
@@ -880,6 +983,10 @@ function SessionView({
                   ) : isPromptRefiner && result.relayRole ? (
                     <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
                       {promptRefinerStepLabel(result.relayRole)}
+                    </Badge>
+                  ) : isDebate && result.debatePhase ? (
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                      {debateTurnLabel(result)}
                     </Badge>
                   ) : (
                     <span className="text-xs text-muted-foreground">(Agent)</span>
@@ -911,7 +1018,7 @@ function SessionView({
               {hasResult ? (
                 <p className="mt-2 text-xs text-muted-foreground">
                   {truncateText(
-                    isSequential && result.revisedAnswerText
+                    isChainedDraft && result.revisedAnswerText
                       ? result.revisedAnswerText
                       : result.responseText,
                     150
@@ -943,7 +1050,8 @@ function SessionView({
               {hasResult ? <span className="mt-2 block text-[11px] italic text-primary">Click to view full response</span> : null}
             </article>
           );
-        })}
+          })
+        )}
 
         <article className={cn("rounded-md border border-border border-l-[3px] bg-card p-3", AGENT_STATUS_BORDER[judgeStep.status] ?? "border-l-muted-foreground")}>
           <div className="flex items-center justify-between gap-2">
@@ -956,11 +1064,11 @@ function SessionView({
         </article>
       </div>
 
-      {expandedAgent ? (
+      {expandedIndex !== null && session.agentResults[expandedIndex] ? (
         <AgentResultPopup
-          agentKey={expandedAgent}
+          agentKey={session.agentResults[expandedIndex]!.agentKey}
           councilType={session.councilType}
-          result={session.agentResults.find((r) => r.agentKey === expandedAgent)}
+          result={session.agentResults[expandedIndex]}
           onClose={() => onToggleAgent(null)}
         />
       ) : null}
@@ -1090,7 +1198,7 @@ function HistoryView({ history, onClearHistory }: HistoryViewProps) {
             >
               <span className="font-semibold text-foreground">{truncateText(session.prompt, 80)}</span>
               <small className="text-xs text-muted-foreground">
-                {formatTimestamp(session.timestamp)} · {session.councilType === "relay" ? "Relay" : session.councilType === "redTeam" ? "Red Team" : session.councilType === "promptRefiner" ? "Prompt Refiner" : "Council"} · {formatSessionStatus(session.status)} · {session.agentsUsed.length} agent{session.agentsUsed.length !== 1 ? "s" : ""} · Judge: {formatAppName(session.judgeApp)}
+                {formatTimestamp(session.timestamp)} · {session.councilType === "relay" ? "Relay" : session.councilType === "redTeam" ? "Red Team" : session.councilType === "promptRefiner" ? "Prompt Refiner" : session.councilType === "debate" ? "Debate" : "Council"} · {formatSessionStatus(session.status)} · {session.agentsUsed.length} agent{session.agentsUsed.length !== 1 ? "s" : ""} · Judge: {formatAppName(session.judgeApp)}
               </small>
               {!session.judgeChatUrl ? <em className="text-xs text-muted-foreground">Judge URL unavailable</em> : null}
             </button>
@@ -1125,6 +1233,114 @@ function ProbeStepRow({ step }: { step: ProbeStep }) {
   );
 }
 
+interface DebateGroupCardProps {
+  agentKey: AppKey;
+  turns: { result: AgentResult; index: number }[];
+  expandedIndex: number | null;
+  isRunning: boolean;
+  onToggleAgent: (index: number | null) => void;
+  onSkipAgent: (agentKey: AppKey) => Promise<void>;
+}
+
+function debatePhaseChipLabel(result: AgentResult): string {
+  return result.debatePhase === "opening" ? "Opening" : `R${result.debateRound ?? 1}`;
+}
+
+// Per-status pill styling for a debater's phase chips.
+const DEBATE_CHIP_CLASS: Record<string, string> = {
+  done: "border-success text-success",
+  injecting: "border-primary text-primary",
+  waiting: "border-primary text-primary",
+  pending: "border-border text-muted-foreground",
+  skipped: "border-warning text-warning",
+  error: "border-destructive text-destructive",
+  timeout: "border-destructive text-destructive"
+};
+
+function debateChipGlyph(status: string): string {
+  if (status === "done") return " ✓";
+  if (status === "skipped") return " ⤼";
+  if (status === "error" || status === "timeout") return " ✕";
+  if (status === "injecting" || status === "waiting") return " …";
+  return "";
+}
+
+/**
+ * One card per debater in a debate. Instead of a separate row for every turn,
+ * a debater's opening + rebuttal turns are shown as compact status chips that
+ * update as each turn completes; a done chip opens that turn's full response.
+ */
+function DebateGroupCard({
+  agentKey,
+  turns,
+  expandedIndex,
+  isRunning,
+  onToggleAgent,
+  onSkipAgent
+}: DebateGroupCardProps) {
+  const activeTurn = turns.find((t) => t.result.status === "injecting" || t.result.status === "waiting");
+  const doneCount = turns.filter((t) => t.result.status === "done").length;
+  const allSettled = turns.every((t) =>
+    ["done", "skipped", "error", "timeout"].includes(t.result.status)
+  );
+  const cardStatus = activeTurn ? activeTurn.result.status : allSettled ? "done" : "pending";
+
+  return (
+    <article
+      className={cn(
+        "rounded-md border border-border border-l-[3px] bg-card p-3",
+        AGENT_STATUS_BORDER[cardStatus] ?? "border-l-muted-foreground"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <strong className="text-sm text-foreground">{formatAppName(agentKey)}</strong>
+        <div className="flex items-center gap-2">
+          {isRunning && activeTurn ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                void onSkipAgent(agentKey);
+              }}
+              type="button"
+            >
+              Skip
+            </Button>
+          ) : null}
+          <span className="text-xs text-muted-foreground">
+            {activeTurn ? `${debatePhaseChipLabel(activeTurn.result)}…` : `${doneCount}/${turns.length}`}
+          </span>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {turns.map(({ result, index }) => {
+          const clickable = result.status === "done" && Boolean(result.responseText);
+          const isExpanded = expandedIndex === index;
+          return (
+            <button
+              key={index}
+              type="button"
+              disabled={!clickable}
+              onClick={() => clickable && onToggleAgent(isExpanded ? null : index)}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide transition-colors",
+                DEBATE_CHIP_CLASS[result.status] ?? "border-border text-muted-foreground",
+                clickable ? "cursor-pointer hover:bg-secondary" : "cursor-default",
+                isExpanded && "ring-1 ring-primary"
+              )}
+              title={formatAgentStatus(result.status, result.errorReason)}
+            >
+              {debatePhaseChipLabel(result)}{debateChipGlyph(result.status)}
+            </button>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
 interface AgentResultPopupProps {
   agentKey: AppKey;
   councilType: CouncilType;
@@ -1136,15 +1352,18 @@ function AgentResultPopup({ agentKey, councilType, result, onClose }: AgentResul
   if (!result) return null;
 
   const isPromptRefiner = councilType === "promptRefiner";
+  const isDebate = councilType === "debate";
   const duration = result.completedAt && result.startedAt
     ? ((result.completedAt - result.startedAt) / 1000).toFixed(1) + "s"
     : "—";
   const hasRelaySections = Boolean(result.critiqueText || result.revisedAnswerText);
   const roleTitle = result.redTeamRole
     ? redTeamStepLabel(result.redTeamRole)
-    : result.relayRole
-      ? (isPromptRefiner ? promptRefinerStepLabel(result.relayRole) : relayStepLabel(result.relayRole))
-      : null;
+    : isDebate && result.debatePhase
+      ? (result.debatePhase === "opening" ? "Opening statement" : `Rebuttal (round ${result.debateRound ?? 1})`)
+      : result.relayRole
+        ? (isPromptRefiner ? promptRefinerStepLabel(result.relayRole) : relayStepLabel(result.relayRole))
+        : null;
   // Role-appropriate section headers (shared across relay, red team, refiner).
   const critiqueHeading = result.redTeamRole === "attacker"
     ? "Attacks"
@@ -1179,10 +1398,22 @@ function AgentResultPopup({ agentKey, councilType, result, onClose }: AgentResul
             {roleTitle ? ` — ${roleTitle}` : " — Full Response"}
           </DialogTitle>
         </DialogHeader>
-        <div className="flex flex-wrap gap-3 border-b border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3 text-xs text-muted-foreground">
           <span>Status: {formatAgentStatus(result.status, result.errorReason)}</span>
           <span>Duration: {duration}</span>
           <span>Length: {result.responseText.length.toLocaleString()} chars</span>
+          {result.chatUrl ? (
+            <a
+              href={result.chatUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-primary underline hover:opacity-80"
+            >
+              View conversation ↗
+            </a>
+          ) : (
+            <span className="italic opacity-70">Chat link unavailable</span>
+          )}
         </div>
         {result.responseText ? (
           <>

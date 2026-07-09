@@ -19,6 +19,11 @@ import {
   buildPromptRefinerJudgePromptAsync
 } from "../promptRefinerPrompt";
 import { parseRefinerResponse } from "../promptRefinerResponseParser";
+import {
+  buildDebateTurnPrompt,
+  buildDebateJudgePromptAsync,
+  type DebateTranscriptEntry
+} from "../debatePrompt";
 import { withResponseBudget } from "../responseBudget";
 import {
   type ActiveCouncilSession,
@@ -125,6 +130,18 @@ export async function runCouncil(
     callbacks.onUpdate(session);
   };
 
+  // Index-based update: needed for debate, where the same agent appears in
+  // multiple turns so key-based matching would hit the wrong entry.
+  const updateAgentAt = (index: number, patch: Partial<AgentResult>): void => {
+    session = {
+      ...session,
+      agentResults: session.agentResults.map((r, idx) =>
+        idx === index ? { ...r, ...patch } : r
+      )
+    };
+    callbacks.onUpdate(session);
+  };
+
   const updateJudge = (patch: Partial<JudgeStep>): void => {
     session = {
       ...session,
@@ -142,19 +159,25 @@ export async function runCouncil(
     return false;
   };
 
-  const agentKeys = session.agentsUsed;
   const isRelay = session.councilType === "relay";
   const isRedTeam = session.councilType === "redTeam";
   const isPromptRefiner = session.councilType === "promptRefiner";
+  const isDebate = session.councilType === "debate";
   // Both relay and prompt refiner chain a single evolving draft through the
   // agents by index (step 0 = author/drafter, later steps = reviewer/enhancer).
   const isChained = isRelay || isPromptRefiner;
+  // The per-step key list. For most types this is the selected agents; for
+  // debate, agentResults is pre-seeded with one entry per TURN (openings +
+  // rebuttal passes), so we step through those instead.
+  const agentKeys = isDebate ? session.agentResults.map((r) => r.agentKey) : session.agentsUsed;
   let currentDraft = "";
   // Red team: attacker findings accumulate through the attack phase and stay
   // available to every defender (findings describe the attack surface).
   const openFindings: RedTeamFinding[] = [];
   const redTeamRoleOf = (key: AppKey): RedTeamRole | undefined =>
     session.agentResults.find((r) => r.agentKey === key)?.redTeamRole;
+  // Debate: accumulate every spoken turn so later turns + the judge see it.
+  const debateTranscript: DebateTranscriptEntry[] = [];
 
   try {
     if (checkCancelled()) return;
@@ -168,6 +191,13 @@ export async function runCouncil(
     for (let i = 0; i < agentKeys.length; i++) {
       const key = agentKeys[i];
       if (checkCancelled()) break;
+
+      // Debate uses index-based updates (the same agent speaks in multiple
+      // turns). Other types have unique keys, so key-based is equivalent.
+      const stepUpdate = (patch: Partial<AgentResult>): void => {
+        if (isDebate) updateAgentAt(i, patch);
+        else updateAgent(key, patch);
+      };
 
       // relayRole is reused by prompt refiner (author = Drafter, reviewer = Enhancer).
       const relayRole: RelayRole | undefined = isChained ? (i === 0 ? "author" : "reviewer") : undefined;
@@ -223,6 +253,15 @@ export async function runCouncil(
               enhancerName: getSupportedApp(key).displayName,
               stepIndex: i + 1
             }).text;
+      } else if (isDebate) {
+        const turn = session.agentResults[i];
+        agentPrompt = buildDebateTurnPrompt({
+          question: session.prompt,
+          speakerName: getSupportedApp(key).displayName,
+          transcript: debateTranscript,
+          phase: turn?.debatePhase ?? "opening",
+          round: turn?.debateRound ?? 1
+        }).text;
       } else {
         // agentJudge — every agent answers the raw prompt, wrapped with a soft
         // response-length budget to keep responses bounded for the judge.
@@ -234,7 +273,7 @@ export async function runCouncil(
       const needsDraft = (isChained && relayRole === "reviewer") ||
         (isRedTeam && (redTeamRole === "attacker" || redTeamRole === "defender"));
       if (needsDraft && !currentDraft.trim()) {
-        updateAgent(key, {
+        stepUpdate({
           status: "error",
           errorReason: "dom_error",
           ...roleMeta,
@@ -244,7 +283,7 @@ export async function runCouncil(
         continue;
       }
 
-      updateAgent(key, {
+      stepUpdate({
         status: "injecting",
         startedAt: Date.now(),
         ...roleMeta
@@ -298,11 +337,11 @@ export async function runCouncil(
 
       // Readiness gating
       if (state.councilTabId == null || !loaded) {
-        updateAgent(key, { status: "error", errorReason: "tab_load_timeout", completedAt: Date.now() });
+        stepUpdate({ status: "error", errorReason: "tab_load_timeout", completedAt: Date.now() });
         continue;
       }
       if (!contentReady) {
-        updateAgent(key, { status: "error", errorReason: "content_script_timeout", completedAt: Date.now() });
+        stepUpdate({ status: "error", errorReason: "content_script_timeout", completedAt: Date.now() });
         continue;
       }
 
@@ -312,7 +351,7 @@ export async function runCouncil(
 
       // Send the prompt and WAIT for the full response, racing against a
       // skip signal so the user can abort a stuck/slow agent.
-      updateAgent(key, {
+      stepUpdate({
         status: "waiting",
         ...roleMeta
       });
@@ -348,7 +387,7 @@ export async function runCouncil(
       }
 
       if (adapterResult.skipped) {
-        updateAgent(key, {
+        stepUpdate({
           status: "skipped",
           errorReason: "skipped",
           completedAt: Date.now(),
@@ -359,7 +398,7 @@ export async function runCouncil(
       }
 
       if (!adapterResult.success) {
-        updateAgent(key, {
+        stepUpdate({
           status: "error",
           errorReason: adapterResult.errorReason ?? "dom_error",
           completedAt: Date.now(),
@@ -373,7 +412,7 @@ export async function runCouncil(
       if (isRelay && relayRole) {
         const parsed = parseRelayResponse(responseText, relayRole);
         currentDraft = parsed.revisedAnswerText;
-        updateAgent(key, {
+        stepUpdate({
           status: "done",
           responseText,
           critiqueText: parsed.critiqueText,
@@ -401,7 +440,7 @@ export async function runCouncil(
             currentDraft = parsed.revisedAnswerText;
           }
         }
-        updateAgent(key, {
+        stepUpdate({
           status: "done",
           responseText,
           critiqueText: parsed.critiqueText,
@@ -416,7 +455,7 @@ export async function runCouncil(
         if (parsed.enhancedPromptText.trim()) {
           currentDraft = parsed.enhancedPromptText;
         }
-        updateAgent(key, {
+        stepUpdate({
           status: "done",
           responseText,
           critiqueText: parsed.notesText,
@@ -426,8 +465,25 @@ export async function runCouncil(
           relayRole,
           inputDraft
         });
+      } else if (isDebate) {
+        const turn = session.agentResults[i];
+        const text = responseText.trim();
+        if (text) {
+          debateTranscript.push({
+            speaker: getSupportedApp(key).displayName,
+            round: turn?.debateRound ?? 1,
+            phase: turn?.debatePhase ?? "opening",
+            text
+          });
+        }
+        stepUpdate({
+          status: "done",
+          responseText,
+          completedAt: adapterResult.completedAt ?? Date.now(),
+          chatUrl: agentChatUrl ?? undefined
+        });
       } else {
-        updateAgent(key, {
+        stepUpdate({
           status: "done",
           responseText,
           completedAt: adapterResult.completedAt ?? Date.now(),
@@ -454,9 +510,11 @@ export async function runCouncil(
           ? "The author produced no answer — nothing to red team, judge step skipped"
           : isPromptRefiner
             ? "No enhanced prompt was produced — judge step skipped"
-            : isRelay
-              ? "Relay chain produced no refined answer — judge step skipped"
-              : "All agents failed to produce a response",
+            : isDebate
+              ? "No debater produced an argument — moderator step skipped"
+              : isRelay
+                ? "Relay chain produced no refined answer — judge step skipped"
+                : "All agents failed to produce a response",
         durationMs: Date.now() - session.timestamp
       });
 
@@ -475,7 +533,13 @@ export async function runCouncil(
 
     await sleep(0);
 
-    const judgePrompt = isRedTeam
+    const judgePrompt = isDebate
+      ? await buildDebateJudgePromptAsync({
+          prompt: session.prompt,
+          agentResults: session.agentResults,
+          templateId: session.judgePromptTemplateId
+        })
+      : isRedTeam
       ? await buildRedTeamJudgePromptAsync({
           prompt: session.prompt,
           agentResults: session.agentResults,

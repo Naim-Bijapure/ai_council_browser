@@ -59,12 +59,16 @@ export interface SupportedApp {
 // "agentJudge" — parallel agents then judge. "relay" — sequential critique chain then judge.
 // "redTeam" — an author drafts an answer, attackers try to break it, defenders harden it, then a judge finalizes.
 // "promptRefiner" — a drafter enhances the user's prompt, enhancers progressively refine it, then a judge produces the final enhanced prompt.
-export type CouncilType = "agentJudge" | "relay" | "redTeam" | "promptRefiner";
+// "debate" — debaters state positions then counter each other over N rounds, then a moderator judge delivers the verdict.
+export type CouncilType = "agentJudge" | "relay" | "redTeam" | "promptRefiner" | "debate";
 
 export type RelayRole = "author" | "reviewer";
 
 // Red team pipeline roles. Each selected agent holds exactly one role.
 export type RedTeamRole = "author" | "attacker" | "defender";
+
+// Debate turn phases. "opening" = state a position; "rebuttal" = counter the others.
+export type DebatePhase = "opening" | "rebuttal";
 
 export interface CouncilPreferences {
   councilType: CouncilType;
@@ -76,6 +80,9 @@ export interface CouncilPreferences {
   redTeamRoles?: Partial<Record<AppKey, RedTeamRole>>;
   redTeamJudgePromptTemplateId?: string;
   promptRefinerJudgePromptTemplateId?: string;
+  // Number of rebuttal rounds for the debate council (opening pass runs once).
+  debateRounds?: number;
+  debateJudgePromptTemplateId?: string;
 }
 
 export interface AgentResult {
@@ -88,6 +95,9 @@ export interface AgentResult {
   chatUrl?: string;
   relayRole?: RelayRole;
   redTeamRole?: RedTeamRole;
+  // Debate turn metadata: which rebuttal round (opening = round 1) and the phase.
+  debateRound?: number;
+  debatePhase?: DebatePhase;
   inputDraft?: string;
   // Reused across relay + red team + prompt refiner:
   //  - relay reviewer / red team defender: critiqueText = critique/defense, revisedAnswerText = revised/hardened draft
@@ -142,6 +152,8 @@ export interface RunCouncilRequest {
   judgePromptTemplateId?: string;
   // For the red team council: role per agent, parallel to (and same order as) agentKeys.
   redTeamRoles?: RedTeamRole[];
+  // For the debate council: number of rebuttal rounds.
+  debateRounds?: number;
 }
 
 export function toStoredSession(session: ActiveCouncilSession): StoredCouncilSession {

@@ -4,6 +4,8 @@ import { DEFAULT_JUDGE_PROMPT_TEMPLATE_ID, JUDGE_PROMPT_TEMPLATES } from "./judg
 import { DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID, RELAY_JUDGE_PROMPT_TEMPLATES } from "./relayJudgePromptTemplates";
 import { DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID, RED_TEAM_JUDGE_PROMPT_TEMPLATES } from "./redTeamJudgePromptTemplates";
 import { DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID, PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES } from "./promptRefinerJudgePromptTemplates";
+import { DEFAULT_DEBATE_JUDGE_PROMPT_TEMPLATE_ID, DEBATE_JUDGE_PROMPT_TEMPLATES } from "./debateJudgePromptTemplates";
+import { DEFAULT_DEBATE_ROUNDS, clampDebateRounds } from "./debateTurns";
 import type { AppKey, CouncilPreferences, CouncilType, RedTeamRole } from "./types";
 
 const STORAGE_KEY = "aiCouncilPreferences";
@@ -16,7 +18,9 @@ export const DEFAULT_PREFERENCES: CouncilPreferences = {
   relayJudgePromptTemplateId: DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID,
   redTeamRoles: {},
   redTeamJudgePromptTemplateId: DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID,
-  promptRefinerJudgePromptTemplateId: DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID
+  promptRefinerJudgePromptTemplateId: DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID,
+  debateRounds: DEFAULT_DEBATE_ROUNDS,
+  debateJudgePromptTemplateId: DEFAULT_DEBATE_JUDGE_PROMPT_TEMPLATE_ID
 };
 
 const VALID_RED_TEAM_ROLES: ReadonlySet<RedTeamRole> = new Set(["author", "attacker", "defender"]);
@@ -25,6 +29,7 @@ function normalizeCouncilType(value: unknown): CouncilType {
   if (value === "relay") return "relay";
   if (value === "redTeam") return "redTeam";
   if (value === "promptRefiner") return "promptRefiner";
+  if (value === "debate") return "debate";
   return "agentJudge";
 }
 
@@ -62,6 +67,9 @@ export async function getPreferences(): Promise<CouncilPreferences> {
   const promptRefinerJudgePromptTemplateId = PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === saved.promptRefinerJudgePromptTemplateId)
     ? saved.promptRefinerJudgePromptTemplateId!
     : DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID;
+  const debateJudgePromptTemplateId = DEBATE_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === saved.debateJudgePromptTemplateId)
+    ? saved.debateJudgePromptTemplateId!
+    : DEFAULT_DEBATE_JUDGE_PROMPT_TEMPLATE_ID;
 
   const preferences: CouncilPreferences = {
     councilType: normalizeCouncilType(saved.councilType),
@@ -71,7 +79,9 @@ export async function getPreferences(): Promise<CouncilPreferences> {
     relayJudgePromptTemplateId,
     redTeamRoles: normalizeRedTeamRoles(saved.redTeamRoles),
     redTeamJudgePromptTemplateId,
-    promptRefinerJudgePromptTemplateId
+    promptRefinerJudgePromptTemplateId,
+    debateRounds: clampDebateRounds(saved.debateRounds),
+    debateJudgePromptTemplateId
   };
 
   await savePreferences(preferences);
@@ -96,7 +106,11 @@ export async function savePreferences(preferences: CouncilPreferences): Promise<
       : DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID,
     promptRefinerJudgePromptTemplateId: PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === preferences.promptRefinerJudgePromptTemplateId)
       ? preferences.promptRefinerJudgePromptTemplateId
-      : DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID
+      : DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID,
+    debateRounds: clampDebateRounds(preferences.debateRounds),
+    debateJudgePromptTemplateId: DEBATE_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === preferences.debateJudgePromptTemplateId)
+      ? preferences.debateJudgePromptTemplateId
+      : DEFAULT_DEBATE_JUDGE_PROMPT_TEMPLATE_ID
   };
 
   await browser.storage.sync.set({ [STORAGE_KEY]: safePreferences });

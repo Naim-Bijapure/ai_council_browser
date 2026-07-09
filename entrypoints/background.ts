@@ -17,12 +17,14 @@ import {
   type CouncilSnapshot,
   type DiagnosticReport,
   type JudgeStep,
+  type DebatePhase,
   type PanelRequest,
   type PanelResponse,
   type RedTeamRole,
   type RunCouncilRequest,
   toStoredSession
 } from "../utils/types";
+import { buildDebateTurns, clampDebateRounds } from "../utils/debateTurns";
 
 let activeSession: ActiveCouncilSession | null = null;
 let cancelFlag = false;
@@ -151,7 +153,11 @@ async function startCouncil(request: RunCouncilRequest): Promise<PanelResponse> 
   const agentKeys = request.agentKeys;
   const judgeKey = request.judgeKey;
   const isRedTeam = request.councilType === "redTeam";
+  const isDebate = request.councilType === "debate";
   const redTeamRoles = request.redTeamRoles ?? [];
+  // Debate expands into a turn sequence (opening pass + rebuttal passes); each
+  // turn becomes an agentResults entry so the panel shows the full plan upfront.
+  const debateTurns = isDebate ? buildDebateTurns(agentKeys, clampDebateRounds(request.debateRounds)) : [];
 
   const judgeStep: JudgeStep = {
     status: "pending",
@@ -167,9 +173,13 @@ async function startCouncil(request: RunCouncilRequest): Promise<PanelResponse> 
     agentsUsed: agentKeys,
     judgeApp: judgeKey,
     judgeChatUrl: null,
-    agentResults: agentKeys.map((key, i) =>
-      createPendingAgentResult(key, isRedTeam ? redTeamRoles[i] : undefined)
-    ),
+    agentResults: isDebate
+      ? debateTurns.map((t) =>
+          createPendingAgentResult(t.agentKey, { debateRound: t.round, debatePhase: t.phase })
+        )
+      : agentKeys.map((key, i) =>
+          createPendingAgentResult(key, { redTeamRole: isRedTeam ? redTeamRoles[i] : undefined })
+        ),
     judgeStep,
     agentTabUrl: null,
     status: "running",
@@ -235,17 +245,29 @@ function validateRunRequest(request: RunCouncilRequest): string | null {
     }
   }
 
+  if (request.councilType === "debate" && request.agentKeys.length < 2) {
+    return "Debate needs at least 2 debaters";
+  }
+
   return null;
 }
 
-function createPendingAgentResult(agentKey: AppKey, redTeamRole?: RedTeamRole): AgentResult {
+interface PendingResultOptions {
+  redTeamRole?: RedTeamRole;
+  debateRound?: number;
+  debatePhase?: DebatePhase;
+}
+
+function createPendingAgentResult(agentKey: AppKey, opts: PendingResultOptions = {}): AgentResult {
   return {
     agentKey,
     status: "pending",
     responseText: "",
     startedAt: Date.now(),
     completedAt: null,
-    ...(redTeamRole ? { redTeamRole } : {})
+    ...(opts.redTeamRole ? { redTeamRole: opts.redTeamRole } : {}),
+    ...(opts.debateRound !== undefined ? { debateRound: opts.debateRound } : {}),
+    ...(opts.debatePhase ? { debatePhase: opts.debatePhase } : {})
   };
 }
 
