@@ -13,6 +13,12 @@ import {
   type RedTeamFinding
 } from "../redTeamPrompt";
 import { parseRedTeamResponse } from "../redTeamResponseParser";
+import {
+  buildDrafterPrompt,
+  buildEnhancerPrompt,
+  buildPromptRefinerJudgePromptAsync
+} from "../promptRefinerPrompt";
+import { parseRefinerResponse } from "../promptRefinerResponseParser";
 import { withResponseBudget } from "../responseBudget";
 import {
   type ActiveCouncilSession,
@@ -139,6 +145,10 @@ export async function runCouncil(
   const agentKeys = session.agentsUsed;
   const isRelay = session.councilType === "relay";
   const isRedTeam = session.councilType === "redTeam";
+  const isPromptRefiner = session.councilType === "promptRefiner";
+  // Both relay and prompt refiner chain a single evolving draft through the
+  // agents by index (step 0 = author/drafter, later steps = reviewer/enhancer).
+  const isChained = isRelay || isPromptRefiner;
   let currentDraft = "";
   // Red team: attacker findings accumulate through the attack phase and stay
   // available to every defender (findings describe the attack surface).
@@ -159,17 +169,18 @@ export async function runCouncil(
       const key = agentKeys[i];
       if (checkCancelled()) break;
 
-      const relayRole: RelayRole | undefined = isRelay ? (i === 0 ? "author" : "reviewer") : undefined;
+      // relayRole is reused by prompt refiner (author = Drafter, reviewer = Enhancer).
+      const relayRole: RelayRole | undefined = isChained ? (i === 0 ? "author" : "reviewer") : undefined;
       const redTeamRole: RedTeamRole | undefined = isRedTeam ? redTeamRoleOf(key) : undefined;
       // The draft carried into this step (for display + result metadata).
-      const inputDraft = isRelay && i > 0
+      const inputDraft = isChained && i > 0
         ? currentDraft
         : isRedTeam && redTeamRole !== "author"
           ? currentDraft
           : undefined;
 
       // Role metadata spread into every updateAgent call for this step.
-      const roleMeta: Partial<AgentResult> = isRelay
+      const roleMeta: Partial<AgentResult> = isChained
         ? { relayRole, inputDraft }
         : isRedTeam
           ? { redTeamRole, inputDraft }
@@ -203,6 +214,15 @@ export async function runCouncil(
             stepIndex: i + 1
           }).text;
         }
+      } else if (isPromptRefiner) {
+        agentPrompt = i === 0
+          ? buildDrafterPrompt(session.prompt)
+          : buildEnhancerPrompt({
+              question: session.prompt,
+              previousDraft: currentDraft,
+              enhancerName: getSupportedApp(key).displayName,
+              stepIndex: i + 1
+            }).text;
       } else {
         // agentJudge — every agent answers the raw prompt, wrapped with a soft
         // response-length budget to keep responses bounded for the judge.
@@ -211,7 +231,7 @@ export async function runCouncil(
 
       // Relay reviewers and red team attackers/defenders need a draft to work
       // on — if the author produced nothing, they cannot proceed.
-      const needsDraft = (isRelay && relayRole === "reviewer") ||
+      const needsDraft = (isChained && relayRole === "reviewer") ||
         (isRedTeam && (redTeamRole === "attacker" || redTeamRole === "defender"));
       if (needsDraft && !currentDraft.trim()) {
         updateAgent(key, {
@@ -391,6 +411,21 @@ export async function runCouncil(
           redTeamRole,
           inputDraft
         });
+      } else if (isPromptRefiner && relayRole) {
+        const parsed = parseRefinerResponse(responseText, relayRole);
+        if (parsed.enhancedPromptText.trim()) {
+          currentDraft = parsed.enhancedPromptText;
+        }
+        updateAgent(key, {
+          status: "done",
+          responseText,
+          critiqueText: parsed.notesText,
+          revisedAnswerText: parsed.enhancedPromptText || undefined,
+          completedAt: adapterResult.completedAt ?? Date.now(),
+          chatUrl: agentChatUrl ?? undefined,
+          relayRole,
+          inputDraft
+        });
       } else {
         updateAgent(key, {
           status: "done",
@@ -403,13 +438,13 @@ export async function runCouncil(
 
     if (await abortIfCancelled(session, callbacks, state, checkCancelled)) return;
 
-    if (isRelay || isRedTeam) {
+    if (isChained || isRedTeam) {
       session = update({ relayFinalDraft: currentDraft });
     }
 
     // Step 4: Check if we have enough to proceed to judge
     const successfulAgents = session.agentResults.filter((r) => r.status === "done");
-    const canProceedToJudge = (isRelay || isRedTeam)
+    const canProceedToJudge = (isChained || isRedTeam)
       ? currentDraft.trim().length > 0
       : successfulAgents.length > 0;
     if (!canProceedToJudge) {
@@ -417,9 +452,11 @@ export async function runCouncil(
         status: "partial_failure",
         errorMessage: isRedTeam
           ? "The author produced no answer — nothing to red team, judge step skipped"
-          : isRelay
-            ? "Relay chain produced no refined answer — judge step skipped"
-            : "All agents failed to produce a response",
+          : isPromptRefiner
+            ? "No enhanced prompt was produced — judge step skipped"
+            : isRelay
+              ? "Relay chain produced no refined answer — judge step skipped"
+              : "All agents failed to produce a response",
         durationMs: Date.now() - session.timestamp
       });
 
@@ -440,6 +477,13 @@ export async function runCouncil(
 
     const judgePrompt = isRedTeam
       ? await buildRedTeamJudgePromptAsync({
+          prompt: session.prompt,
+          agentResults: session.agentResults,
+          finalDraft: currentDraft,
+          templateId: session.judgePromptTemplateId
+        })
+      : isPromptRefiner
+      ? await buildPromptRefinerJudgePromptAsync({
           prompt: session.prompt,
           agentResults: session.agentResults,
           finalDraft: currentDraft,

@@ -58,7 +58,8 @@ export interface SupportedApp {
 
 // "agentJudge" — parallel agents then judge. "relay" — sequential critique chain then judge.
 // "redTeam" — an author drafts an answer, attackers try to break it, defenders harden it, then a judge finalizes.
-export type CouncilType = "agentJudge" | "relay" | "redTeam";
+// "promptRefiner" — a drafter enhances the user's prompt, enhancers progressively refine it, then a judge produces the final enhanced prompt.
+export type CouncilType = "agentJudge" | "relay" | "redTeam" | "promptRefiner";
 
 export type RelayRole = "author" | "reviewer";
 
@@ -74,6 +75,7 @@ export interface CouncilPreferences {
   // Per-agent role assignment for the red team council (keyed by app).
   redTeamRoles?: Partial<Record<AppKey, RedTeamRole>>;
   redTeamJudgePromptTemplateId?: string;
+  promptRefinerJudgePromptTemplateId?: string;
 }
 
 export interface AgentResult {
@@ -87,10 +89,12 @@ export interface AgentResult {
   relayRole?: RelayRole;
   redTeamRole?: RedTeamRole;
   inputDraft?: string;
-  // Reused across relay + red team:
+  // Reused across relay + red team + prompt refiner:
   //  - relay reviewer / red team defender: critiqueText = critique/defense, revisedAnswerText = revised/hardened draft
   //  - red team author: revisedAnswerText = the initial draft
   //  - red team attacker: critiqueText = the attack findings
+  //  - prompt refiner drafter: revisedAnswerText = the initial enhanced prompt
+  //  - prompt refiner enhancer: critiqueText = change notes, revisedAnswerText = the enhanced prompt
   critiqueText?: string;
   revisedAnswerText?: string;
 }

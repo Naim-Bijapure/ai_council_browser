@@ -3,6 +3,7 @@ import { DEFAULT_AGENT_KEYS, DEFAULT_JUDGE_KEY, isAppKey, normalizeAppKeys } fro
 import { DEFAULT_JUDGE_PROMPT_TEMPLATE_ID, JUDGE_PROMPT_TEMPLATES } from "./judgePromptTemplates";
 import { DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID, RELAY_JUDGE_PROMPT_TEMPLATES } from "./relayJudgePromptTemplates";
 import { DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID, RED_TEAM_JUDGE_PROMPT_TEMPLATES } from "./redTeamJudgePromptTemplates";
+import { DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID, PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES } from "./promptRefinerJudgePromptTemplates";
 import type { AppKey, CouncilPreferences, CouncilType, RedTeamRole } from "./types";
 
 const STORAGE_KEY = "aiCouncilPreferences";
@@ -14,7 +15,8 @@ export const DEFAULT_PREFERENCES: CouncilPreferences = {
   judgePromptTemplateId: DEFAULT_JUDGE_PROMPT_TEMPLATE_ID,
   relayJudgePromptTemplateId: DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID,
   redTeamRoles: {},
-  redTeamJudgePromptTemplateId: DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID
+  redTeamJudgePromptTemplateId: DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID,
+  promptRefinerJudgePromptTemplateId: DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID
 };
 
 const VALID_RED_TEAM_ROLES: ReadonlySet<RedTeamRole> = new Set(["author", "attacker", "defender"]);
@@ -22,6 +24,7 @@ const VALID_RED_TEAM_ROLES: ReadonlySet<RedTeamRole> = new Set(["author", "attac
 function normalizeCouncilType(value: unknown): CouncilType {
   if (value === "relay") return "relay";
   if (value === "redTeam") return "redTeam";
+  if (value === "promptRefiner") return "promptRefiner";
   return "agentJudge";
 }
 
@@ -56,6 +59,9 @@ export async function getPreferences(): Promise<CouncilPreferences> {
   const redTeamJudgePromptTemplateId = RED_TEAM_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === saved.redTeamJudgePromptTemplateId)
     ? saved.redTeamJudgePromptTemplateId!
     : DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID;
+  const promptRefinerJudgePromptTemplateId = PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === saved.promptRefinerJudgePromptTemplateId)
+    ? saved.promptRefinerJudgePromptTemplateId!
+    : DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID;
 
   const preferences: CouncilPreferences = {
     councilType: normalizeCouncilType(saved.councilType),
@@ -64,7 +70,8 @@ export async function getPreferences(): Promise<CouncilPreferences> {
     judgePromptTemplateId,
     relayJudgePromptTemplateId,
     redTeamRoles: normalizeRedTeamRoles(saved.redTeamRoles),
-    redTeamJudgePromptTemplateId
+    redTeamJudgePromptTemplateId,
+    promptRefinerJudgePromptTemplateId
   };
 
   await savePreferences(preferences);
@@ -86,7 +93,10 @@ export async function savePreferences(preferences: CouncilPreferences): Promise<
     redTeamRoles: normalizeRedTeamRoles(preferences.redTeamRoles),
     redTeamJudgePromptTemplateId: RED_TEAM_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === preferences.redTeamJudgePromptTemplateId)
       ? preferences.redTeamJudgePromptTemplateId
-      : DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID
+      : DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID,
+    promptRefinerJudgePromptTemplateId: PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES.some((t) => t.id === preferences.promptRefinerJudgePromptTemplateId)
+      ? preferences.promptRefinerJudgePromptTemplateId
+      : DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID
   };
 
   await browser.storage.sync.set({ [STORAGE_KEY]: safePreferences });

@@ -16,6 +16,7 @@ interface AgentOrderListProps {
   selectedKeys: AppKey[]; // Ordered array of selected agent keys
   judgeKey: AppKey; // Current judge key (excluded from selection)
   showRelayRoles?: boolean;
+  showPromptRefinerRoles?: boolean; // Drafter / Enhancer labels by order
   redTeamMode?: boolean; // When true, each selected agent shows a role selector
   redTeamRoles?: Partial<Record<AppKey, RedTeamRole>>;
   onRedTeamRoleChange?: (key: AppKey, role: RedTeamRole) => void;
@@ -33,11 +34,17 @@ function relayRoleLabel(orderIndex: number | null): string | null {
   return orderIndex === 1 ? "Author" : "Reviewer";
 }
 
+function promptRefinerRoleLabel(orderIndex: number | null): string | null {
+  if (orderIndex === null) return null;
+  return orderIndex === 1 ? "Drafter" : "Enhancer";
+}
+
 export function AgentOrderList({
   agents,
   selectedKeys,
   judgeKey,
   showRelayRoles = false,
+  showPromptRefinerRoles = false,
   redTeamMode = false,
   redTeamRoles,
   onRedTeamRoleChange,
@@ -129,7 +136,13 @@ export function AgentOrderList({
             agent={agent}
             isSelected={isSelected}
             orderIndex={orderIndex}
-            roleLabel={showRelayRoles ? relayRoleLabel(orderIndex) : null}
+            roleLabel={
+              showRelayRoles
+                ? relayRoleLabel(orderIndex)
+                : showPromptRefinerRoles
+                  ? promptRefinerRoleLabel(orderIndex)
+                  : null
+            }
             isJudge={false}
             isDragged={isDragged}
             isDropTarget={isDropTarget}

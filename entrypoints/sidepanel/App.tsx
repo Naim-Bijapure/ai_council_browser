@@ -52,6 +52,10 @@ import {
   DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID,
   RED_TEAM_JUDGE_PROMPT_TEMPLATES
 } from "../../utils/redTeamJudgePromptTemplates";
+import {
+  DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID,
+  PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES
+} from "../../utils/promptRefinerJudgePromptTemplates";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -106,7 +110,8 @@ function formatJudgeStepLabel(status: JudgeStepStatus, detail?: JudgeStepDetail)
 const COUNCIL_TYPE_LABELS: Record<CouncilType, string> = {
   agentJudge: "Agent → Judge Council",
   relay: "Relay Council",
-  redTeam: "Red Team Council"
+  redTeam: "Red Team Council",
+  promptRefiner: "Prompt Refiner"
 };
 
 const RED_TEAM_ROLE_LABELS: Record<RedTeamRole, string> = {
@@ -147,15 +152,18 @@ export default function App() {
   const [agentJudgeTemplateId, setAgentJudgeTemplateId] = useState(DEFAULT_JUDGE_PROMPT_TEMPLATE_ID);
   const [relayTemplateId, setRelayTemplateId] = useState(DEFAULT_RELAY_JUDGE_PROMPT_TEMPLATE_ID);
   const [redTeamTemplateId, setRedTeamTemplateId] = useState(DEFAULT_RED_TEAM_JUDGE_PROMPT_TEMPLATE_ID);
+  const [promptRefinerTemplateId, setPromptRefinerTemplateId] = useState(DEFAULT_PROMPT_REFINER_JUDGE_PROMPT_TEMPLATE_ID);
   const [redTeamRoles, setRedTeamRoles] = useState<Partial<Record<AppKey, RedTeamRole>>>({});
 
   const currentTemplateId =
     councilType === "relay" ? relayTemplateId
     : councilType === "redTeam" ? redTeamTemplateId
+    : councilType === "promptRefiner" ? promptRefinerTemplateId
     : agentJudgeTemplateId;
   const currentTemplates =
     councilType === "relay" ? RELAY_JUDGE_PROMPT_TEMPLATES
     : councilType === "redTeam" ? RED_TEAM_JUDGE_PROMPT_TEMPLATES
+    : councilType === "promptRefiner" ? PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES
     : JUDGE_PROMPT_TEMPLATES;
   const [snapshot, setSnapshot] = useState<CouncilSnapshot>(idleSnapshot);
   const [history, setHistory] = useState<StoredCouncilSession[]>([]);
@@ -223,7 +231,7 @@ export default function App() {
     if (!loading) {
       void savePreferences();
     }
-  }, [councilType, selectedAgents, judgeKey, agentJudgeTemplateId, relayTemplateId, redTeamTemplateId, redTeamRoles]);
+  }, [councilType, selectedAgents, judgeKey, agentJudgeTemplateId, relayTemplateId, redTeamTemplateId, promptRefinerTemplateId, redTeamRoles]);
 
   async function sendMessage(request: PanelRequest): Promise<PanelResponse> {
     return browser.runtime.sendMessage(request);
@@ -256,6 +264,9 @@ export default function App() {
         if (response.preferences.redTeamJudgePromptTemplateId) {
           setRedTeamTemplateId(response.preferences.redTeamJudgePromptTemplateId);
         }
+        if (response.preferences.promptRefinerJudgePromptTemplateId) {
+          setPromptRefinerTemplateId(response.preferences.promptRefinerJudgePromptTemplateId);
+        }
         if (response.preferences.redTeamRoles) {
           setRedTeamRoles(response.preferences.redTeamRoles);
         }
@@ -275,7 +286,8 @@ export default function App() {
       judgePromptTemplateId: agentJudgeTemplateId,
       relayJudgePromptTemplateId: relayTemplateId,
       redTeamRoles,
-      redTeamJudgePromptTemplateId: redTeamTemplateId
+      redTeamJudgePromptTemplateId: redTeamTemplateId,
+      promptRefinerJudgePromptTemplateId: promptRefinerTemplateId
     };
     await sendMessage({ type: "SAVE_PREFERENCES", preferences });
   }
@@ -470,7 +482,9 @@ export default function App() {
               ? `${selectedAgents.length} agent${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} judge`
               : councilType === "redTeam"
                 ? `Red team: ${redTeamAuthors}A · ${redTeamAttackers}⚔ · ${redTeamDefenders}🛡 → ${formatAppName(judgeKey)} judge`
-                : `Relay: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} judge`}
+                : councilType === "promptRefiner"
+                  ? `Prompt refiner: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} final prompt`
+                  : `Relay: ${selectedAgents.length} step${selectedAgents.length !== 1 ? "s" : ""} → ${formatAppName(judgeKey)} judge`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -562,6 +576,8 @@ export default function App() {
                       setRelayTemplateId(id);
                     } else if (councilType === "redTeam") {
                       setRedTeamTemplateId(id);
+                    } else if (councilType === "promptRefiner") {
+                      setPromptRefinerTemplateId(id);
                     } else {
                       setAgentJudgeTemplateId(id);
                     }
@@ -582,7 +598,7 @@ export default function App() {
 
               <fieldset className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
                 <legend className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  {councilType === "relay" ? "Relay order" : councilType === "redTeam" ? "Red team roles" : "Agents"}
+                  {councilType === "relay" ? "Relay order" : councilType === "redTeam" ? "Red team roles" : councilType === "promptRefiner" ? "Refinement order" : "Agents"}
                 </legend>
                 {councilType === "relay" && selectedAgents.length === 1 ? (
                   <p className="mb-1 text-xs text-muted-foreground">
@@ -594,11 +610,17 @@ export default function App() {
                     Assign a role to each agent. Runs in the order shown (drag to reorder): the Author drafts first, then each agent attacks or defends in turn, and the Judge finalizes.
                   </p>
                 ) : null}
+                {councilType === "promptRefiner" ? (
+                  <p className="mb-1 text-xs text-muted-foreground">
+                    Runs in the order shown (drag to reorder): the Drafter enhances your prompt, each Enhancer refines it further, and the Judge outputs the final prompt. Agents improve the prompt — they do not answer it.
+                  </p>
+                ) : null}
                 <AgentOrderList
                   agents={agentApps}
                   selectedKeys={selectedAgents}
                   judgeKey={judgeKey}
                   showRelayRoles={councilType === "relay"}
+                  showPromptRefinerRoles={councilType === "promptRefiner"}
                   redTeamMode={councilType === "redTeam"}
                   redTeamRoles={redTeamRoles}
                   onRedTeamRoleChange={setRedTeamRole}
@@ -616,7 +638,7 @@ export default function App() {
               ) : null}
 
               <Button disabled={!canRun} type="submit">
-                {councilType === "relay" ? "Run relay" : councilType === "redTeam" ? "Run red team" : "Run council"}
+                {councilType === "relay" ? "Run relay" : councilType === "redTeam" ? "Run red team" : councilType === "promptRefiner" ? "Run refiner" : "Run council"}
               </Button>
 
               {SHOW_DEV_TOOLS && councilType === "agentJudge" ? (
@@ -736,10 +758,16 @@ function redTeamStepLabel(role: AgentResult["redTeamRole"]): string {
   return role ? RED_TEAM_ROLE_LABELS[role] : "Agent";
 }
 
+// Prompt refiner reuses relayRole: author = Drafter, reviewer = Enhancer.
+function promptRefinerStepLabel(role: AgentResult["relayRole"]): string {
+  return role === "author" ? "Drafter" : role === "reviewer" ? "Enhancer" : "Agent";
+}
+
 function resolveTemplateName(councilType: CouncilType, templateId: string): string {
   const templates =
     councilType === "relay" ? RELAY_JUDGE_PROMPT_TEMPLATES
     : councilType === "redTeam" ? RED_TEAM_JUDGE_PROMPT_TEMPLATES
+    : councilType === "promptRefiner" ? PROMPT_REFINER_JUDGE_PROMPT_TEMPLATES
     : JUDGE_PROMPT_TEMPLATES;
   const match = templates.find((t) => t.id === templateId);
   return match ? match.name : templateId;
@@ -757,7 +785,8 @@ function SessionView({
 }: SessionViewProps) {
   const isRelay = session.councilType === "relay";
   const isRedTeam = session.councilType === "redTeam";
-  const isSequential = isRelay || isRedTeam;
+  const isPromptRefiner = session.councilType === "promptRefiner";
+  const isSequential = isRelay || isRedTeam || isPromptRefiner;
   const judgeStep = session.judgeStep ?? { status: "pending" as JudgeStepStatus, startedAt: null, completedAt: null };
   const isHandoff = session.status === "done" || session.status === "partial" || judgeStep.status === "sent";
   const completedAgents = session.agentResults.filter((r) => r.status === "done" || r.status === "error" || r.status === "timeout" || r.status === "skipped").length;
@@ -765,7 +794,11 @@ function SessionView({
   const activeAgent = session.agentResults.find((r) => r.status === "injecting" || r.status === "waiting");
   const showFinalDraft = isSequential && session.relayFinalDraft && !isRunning && judgeStep.status !== "sent";
   const stepLabel = (result: AgentResult): string =>
-    isRedTeam ? redTeamStepLabel(result.redTeamRole) : relayStepLabel(result.relayRole);
+    isRedTeam
+      ? redTeamStepLabel(result.redTeamRole)
+      : isPromptRefiner
+        ? promptRefinerStepLabel(result.relayRole)
+        : relayStepLabel(result.relayRole);
 
   return (
     <div className="flex flex-col gap-4">
@@ -778,7 +811,7 @@ function SessionView({
                 {resolveTemplateName(session.councilType, session.judgePromptTemplateId)}
               </Badge>
             )}
-            {isRedTeam ? <Badge variant="outline">Red Team</Badge> : isRelay ? <Badge variant="outline">Relay</Badge> : <Badge variant="outline">Council</Badge>}
+            {isRedTeam ? <Badge variant="outline">Red Team</Badge> : isPromptRefiner ? <Badge variant="outline">Prompt Refiner</Badge> : isRelay ? <Badge variant="outline">Relay</Badge> : <Badge variant="outline">Council</Badge>}
           </div>
         </div>
         <p className="mt-1 text-foreground">{truncateText(session.prompt, 180)}</p>
@@ -790,7 +823,7 @@ function SessionView({
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>
               {session.status === "judge_handoff"
-                ? `${isRedTeam ? "Red team" : "Relay"} complete — handing off to ${formatAppName(session.judgeApp)} judge`
+                ? `${isRedTeam ? "Red team" : isPromptRefiner ? "Refinement" : "Relay"} complete — handing off to ${formatAppName(session.judgeApp)} judge`
                 : isSequential
                   ? `Step ${Math.min(completedAgents + 1, totalAgents)} of ${totalAgents}`
                   : `${completedAgents} / ${totalAgents} agents complete`}
@@ -805,7 +838,7 @@ function SessionView({
       {showFinalDraft ? (
         <div className="rounded-lg border border-primary/40 bg-primary/10 p-3">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {isRedTeam ? "Hardened answer" : "Final refined draft"}
+            {isRedTeam ? "Hardened answer" : isPromptRefiner ? "Latest enhanced prompt" : "Final refined draft"}
           </span>
           <p className="mt-2 text-sm text-foreground">{truncateText(session.relayFinalDraft ?? "", 240)}</p>
         </div>
@@ -844,6 +877,10 @@ function SessionView({
                     <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
                       {redTeamStepLabel(result.redTeamRole)}
                     </Badge>
+                  ) : isPromptRefiner && result.relayRole ? (
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                      {promptRefinerStepLabel(result.relayRole)}
+                    </Badge>
                   ) : (
                     <span className="text-xs text-muted-foreground">(Agent)</span>
                   )}
@@ -881,9 +918,9 @@ function SessionView({
                   )}
                 </p>
               ) : null}
-              {hasResult && result.critiqueText && (isRelay || (isRedTeam && result.redTeamRole === "defender")) ? (
+              {hasResult && result.critiqueText && (isRelay || isPromptRefiner || (isRedTeam && result.redTeamRole === "defender")) ? (
                 <p className="mt-1 text-[11px] italic text-muted-foreground">
-                  {isRedTeam ? "Defense" : "Critique"}: {truncateText(result.critiqueText, 80)}
+                  {isRedTeam ? "Defense" : isPromptRefiner ? "Notes" : "Critique"}: {truncateText(result.critiqueText, 80)}
                 </p>
               ) : null}
               {result.status === "error" && result.errorReason ? (
@@ -922,6 +959,7 @@ function SessionView({
       {expandedAgent ? (
         <AgentResultPopup
           agentKey={expandedAgent}
+          councilType={session.councilType}
           result={session.agentResults.find((r) => r.agentKey === expandedAgent)}
           onClose={() => onToggleAgent(null)}
         />
@@ -1052,7 +1090,7 @@ function HistoryView({ history, onClearHistory }: HistoryViewProps) {
             >
               <span className="font-semibold text-foreground">{truncateText(session.prompt, 80)}</span>
               <small className="text-xs text-muted-foreground">
-                {formatTimestamp(session.timestamp)} · {session.councilType === "relay" ? "Relay" : session.councilType === "redTeam" ? "Red Team" : "Council"} · {formatSessionStatus(session.status)} · {session.agentsUsed.length} agent{session.agentsUsed.length !== 1 ? "s" : ""} · Judge: {formatAppName(session.judgeApp)}
+                {formatTimestamp(session.timestamp)} · {session.councilType === "relay" ? "Relay" : session.councilType === "redTeam" ? "Red Team" : session.councilType === "promptRefiner" ? "Prompt Refiner" : "Council"} · {formatSessionStatus(session.status)} · {session.agentsUsed.length} agent{session.agentsUsed.length !== 1 ? "s" : ""} · Judge: {formatAppName(session.judgeApp)}
               </small>
               {!session.judgeChatUrl ? <em className="text-xs text-muted-foreground">Judge URL unavailable</em> : null}
             </button>
@@ -1089,13 +1127,15 @@ function ProbeStepRow({ step }: { step: ProbeStep }) {
 
 interface AgentResultPopupProps {
   agentKey: AppKey;
+  councilType: CouncilType;
   result: AgentResult | undefined;
   onClose: () => void;
 }
 
-function AgentResultPopup({ agentKey, result, onClose }: AgentResultPopupProps) {
+function AgentResultPopup({ agentKey, councilType, result, onClose }: AgentResultPopupProps) {
   if (!result) return null;
 
+  const isPromptRefiner = councilType === "promptRefiner";
   const duration = result.completedAt && result.startedAt
     ? ((result.completedAt - result.startedAt) / 1000).toFixed(1) + "s"
     : "—";
@@ -1103,19 +1143,23 @@ function AgentResultPopup({ agentKey, result, onClose }: AgentResultPopupProps) 
   const roleTitle = result.redTeamRole
     ? redTeamStepLabel(result.redTeamRole)
     : result.relayRole
-      ? relayStepLabel(result.relayRole)
+      ? (isPromptRefiner ? promptRefinerStepLabel(result.relayRole) : relayStepLabel(result.relayRole))
       : null;
-  // Role-appropriate section headers (shared between relay + red team).
+  // Role-appropriate section headers (shared across relay, red team, refiner).
   const critiqueHeading = result.redTeamRole === "attacker"
     ? "Attacks"
     : result.redTeamRole === "defender"
       ? "Defense"
-      : "Critique";
+      : isPromptRefiner
+        ? "Notes"
+        : "Critique";
   const answerHeading = result.redTeamRole === "author"
     ? "Initial answer"
     : result.redTeamRole === "defender"
       ? "Hardened answer"
-      : "Revised answer";
+      : isPromptRefiner
+        ? "Enhanced prompt"
+        : "Revised answer";
 
   async function copyToClipboard(text: string): Promise<void> {
     if (!text) return;
