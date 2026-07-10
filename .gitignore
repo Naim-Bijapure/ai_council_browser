@@ -12,3 +12,9 @@ pnpm-debug.log*
 .env.*
 !.env.example
 .DS_Store
+# Local tooling / scratch
+tools/ffmpeg/
+docs/demo-work/
+docs/demo-out/
+*.mp4
+!assets/**/*.mp4

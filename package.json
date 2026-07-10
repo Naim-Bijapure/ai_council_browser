@@ -4,6 +4,24 @@
   "description": "AI Council — multi-LLM council workflows from a Chrome side panel.",
   "type": "module",
   "private": true,
+  "license": "MIT",
+  "author": "Naim Bijapure",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Naim-Bijapure/ai-council.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Naim-Bijapure/ai-council/issues"
+  },
+  "homepage": "https://github.com/Naim-Bijapure/ai-council#readme",
+  "keywords": [
+    "chrome-extension",
+    "browser-extension",
+    "ai",
+    "llm",
+    "wxt",
+    "manifest-v3"
+  ],
   "scripts": {
     "dev": "wxt -b chrome --host 127.0.0.1 --port 3000",
     "dev:brave": "WXT_CHROMIUM_BINARY=./scripts/brave-flatpak wxt -b chrome --host 127.0.0.1 --port 3000",

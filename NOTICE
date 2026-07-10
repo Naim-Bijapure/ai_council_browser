@@ -1,0 +1,41 @@
+AI Council
+Copyright (c) 2026 Naim Bijapure
+
+This product is licensed under the MIT License. See the LICENSE file.
+
+---
+
+Third-party software
+
+This project depends on open-source packages (npm dependencies such as React,
+WXT, Radix UI, Tailwind CSS, Lucide, and others). Those packages remain under
+their own licenses (primarily MIT, Apache-2.0, BSD, and ISC).
+
+A high-level summary of dependency licenses in a typical install:
+
+  MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, MPL-2.0, and dual-licensed
+  packages as declared by their authors.
+
+To regenerate a full dependency license inventory after `npm install`:
+
+  npx license-checker --summary
+  npx license-checker --production --relativeLicensePath
+
+Bundled production builds include only the code that the bundler emits for
+runtime dependencies; always consult each package’s own LICENSE file under
+node_modules/ for authoritative terms.
+
+---
+
+Third-party services and trademarks
+
+AI Council automates interaction with third-party AI chat websites (for example
+ChatGPT, Claude, Gemini, DeepSeek, Grok, Perplexity, Qwen, and Kimi). Those
+services are not affiliated with this project.
+
+Product names, logos, and trademarks belong to their respective owners. Use of
+those names is for compatibility and interoperability description only and does
+not imply endorsement.
+
+Users must comply with each service’s terms of use, acceptable use policies,
+and local law when running this extension against those sites.

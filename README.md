@@ -1,10 +1,14 @@
 # AI Council
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 A Chrome/Brave extension (`ai-council`) built with WXT, React, TypeScript, and Manifest V3.
 
 The extension automates a configurable AI Council workflow: it sends your prompt to one or more selected LLM **agents** in parallel (ChatGPT, Claude, Gemini, DeepSeek, Qwen, Kimi, Perplexity, Grok), extracts each response, builds a structured judge prompt from the successful responses, submits it to a selected **judge** app, confirms the message was sent, and captures the judge's conversation permalink. The judge response is never captured — you read the verdict directly in the judge tab.
 
 Which apps are available as agents, as judge, and how they are configured is driven entirely by `config/apps.json` and the per-app `config/selectors/*.json` files.
+
+> **Not affiliated** with OpenAI, Anthropic, Google, xAI, DeepSeek, Perplexity, or any other AI provider. Product names are trademarks of their respective owners. Use of third-party sites is subject to those services’ terms.
 
 ## Branding
 
@@ -322,3 +326,15 @@ utils/
 wxt.config.ts                  # WXT and generated manifest configuration
 tsconfig.json                  # TypeScript configuration
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Security reports: [SECURITY.md](./SECURITY.md).
+
+## License
+
+This project is open source under the [MIT License](./LICENSE).
+
+Copyright (c) 2026 Naim Bijapure.
+
+Third-party dependency notices and trademark disclaimers: [NOTICE](./NOTICE).

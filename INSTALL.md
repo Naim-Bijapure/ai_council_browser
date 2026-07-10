@@ -82,6 +82,8 @@ See the main [README](./README.md) for development details.
 - **Local data only:** preferences and session history stay in your browser (`chrome.storage` + IndexedDB). There is no AI Council backend.
 - **DOM automation can break** when ChatGPT, Claude, Gemini, etc. change their UI. If a site stops working, selectors may need an update.
 - Keep the extension folder on disk. If you delete or move it, Chrome may disable the extension until you load it again.
+- **License:** AI Council is open source ([MIT](./LICENSE)). Third-party AI sites and trademarks are separate; see [NOTICE](./NOTICE).
+- Comply with each AI site’s terms of use when automating it.
 
 ## Troubleshooting
 
